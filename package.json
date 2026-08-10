@@ -11,7 +11,10 @@
     "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "pnpm run build && node --test tests/rendered-html.test.mjs",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next"
+    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "cf:types": "WRANGLER_LOG_PATH=.wrangler/types.log wrangler types worker-configuration.d.ts",
+    "db:migrate:local": "WRANGLER_LOG_PATH=.wrangler/migrations.log wrangler d1 migrations apply solomexico --local",
+    "db:migrate:remote": "WRANGLER_LOG_PATH=.wrangler/migrations-remote.log wrangler d1 migrations apply solomexico --remote"
   },
   "dependencies": {
     "next": "16.2.6",
@@ -19,7 +22,7 @@
     "react-dom": "19.2.6"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/vite-plugin": "1.51.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
@@ -31,7 +34,7 @@
     "typescript": "5.9.3",
     "vinext": "0.0.50",
     "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "wrangler": "4.120.0"
   },
   "type": "module"
 }

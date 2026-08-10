@@ -5,7 +5,8 @@ import Image from "next/image";
 
 type Surface = "family" | "admin" | "kitchen";
 type Language = "es" | "en";
-type Category = "Todos" | "Desayunos" | "Almuerzos" | "Bebidas";
+type Category = "Todos" | "Desayunos" | "Almuerzos" | "Postres" | "Bebidas" | "Especiales";
+type ServiceType = "breakfast" | "lunch";
 type KdsStage = "Nuevas" | "Preparando" | "Listas" | "Empacadas";
 
 type Dish = {
@@ -27,6 +28,7 @@ type Student = {
   detail: string;
   initials: string;
   color: string;
+  allergies: string[];
 };
 
 type KdsOrder = {
@@ -48,16 +50,18 @@ const students: Student[] = [
   {
     id: "sofia",
     name: "Sofía M.",
-    detail: "3° B · Aula 12 · Miss Laura",
+    detail: "3° B · Aula 12 · Miss Laura · Edificio Primaria",
     initials: "SM",
     color: "#1f66d1",
+    allergies: ["Maní", "Nueces"],
   },
   {
     id: "mateo",
     name: "Mateo M.",
-    detail: "Kinder A · Edificio Norte",
+    detail: "Kinder A · Aula K-A · Miss Andrea · Edificio Preescolar",
     initials: "MM",
     color: "#11a5a8",
+    allergies: [],
   },
 ];
 
@@ -122,6 +126,224 @@ const dishes: Dish[] = [
     tone: "gold",
   },
   {
+    id: "baleada",
+    name: "Baleada escolar",
+    nameEn: "School baleada",
+    description: "Frijoles, queso y huevo en tortilla de harina",
+    descriptionEn: "Beans, cheese and egg in a flour tortilla",
+    category: "Desayunos",
+    price: 7500,
+    badge: "Catracha",
+    emoji: "🫓",
+    tone: "terracotta",
+  },
+  {
+    id: "avena",
+    name: "Avena con frutas",
+    nameEn: "Oatmeal with fruit",
+    description: "Avena cremosa, banano, fresa y canela",
+    descriptionEn: "Creamy oatmeal, banana, strawberry and cinnamon",
+    category: "Desayunos",
+    price: 8000,
+    badge: "Balanceado",
+    emoji: "🥣",
+    tone: "berry",
+  },
+  {
+    id: "sandwich-huevo",
+    name: "Sándwich de huevo",
+    nameEn: "Egg sandwich",
+    description: "Huevo, queso y aguacate en pan suave",
+    descriptionEn: "Egg, cheese and avocado on soft bread",
+    category: "Desayunos",
+    price: 9500,
+    emoji: "🥪",
+    tone: "avocado",
+  },
+  {
+    id: "pollo-plancha",
+    name: "Pollo a la plancha",
+    nameEn: "Grilled chicken",
+    description: "Pollo, puré de papa y vegetales",
+    descriptionEn: "Chicken, mashed potatoes and vegetables",
+    category: "Almuerzos",
+    price: 13500,
+    emoji: "🍗",
+    tone: "gold",
+  },
+  {
+    id: "pasta",
+    name: "Pasta pomodoro",
+    nameEn: "Pasta pomodoro",
+    description: "Pasta corta, salsa de tomate y queso aparte",
+    descriptionEn: "Short pasta, tomato sauce and cheese on the side",
+    category: "Almuerzos",
+    price: 12000,
+    badge: "Sin picante",
+    emoji: "🍝",
+    tone: "terracotta",
+  },
+  {
+    id: "brownie",
+    name: "Brownie de cacao",
+    nameEn: "Cocoa brownie",
+    description: "Porción escolar horneada, suave y chocolatosa",
+    descriptionEn: "A soft, chocolatey school-size portion",
+    category: "Postres",
+    price: 4500,
+    emoji: "🍫",
+    tone: "berry",
+  },
+  {
+    id: "galleta",
+    name: "Galleta de avena",
+    nameEn: "Oat cookie",
+    description: "Avena, canela y pasas",
+    descriptionEn: "Oats, cinnamon and raisins",
+    category: "Postres",
+    price: 3500,
+    emoji: "🍪",
+    tone: "gold",
+  },
+  {
+    id: "frutas",
+    name: "Vasito de frutas",
+    nameEn: "Fruit cup",
+    description: "Frutas frescas de temporada",
+    descriptionEn: "Fresh seasonal fruit",
+    category: "Postres",
+    price: 5000,
+    badge: "Fresco",
+    emoji: "🍓",
+    tone: "avocado",
+  },
+  {
+    id: "arroz-leche",
+    name: "Arroz con leche",
+    nameEn: "Rice pudding",
+    description: "Arroz cremoso con canela",
+    descriptionEn: "Creamy rice pudding with cinnamon",
+    category: "Postres",
+    price: 4500,
+    emoji: "🍚",
+    tone: "sunset",
+  },
+  {
+    id: "gelatina",
+    name: "Gelatina de colores",
+    nameEn: "Colorful gelatin",
+    description: "Gelatina frutal en porción individual",
+    descriptionEn: "Individual fruit gelatin",
+    category: "Postres",
+    price: 3000,
+    emoji: "🍮",
+    tone: "berry",
+  },
+  {
+    id: "agua",
+    name: "Agua purificada",
+    nameEn: "Purified water",
+    description: "Botella individual de 12 oz",
+    descriptionEn: "Individual 12 oz bottle",
+    category: "Bebidas",
+    price: 2500,
+    emoji: "💧",
+    tone: "avocado",
+  },
+  {
+    id: "limonada",
+    name: "Limonada natural",
+    nameEn: "Fresh lemonade",
+    description: "Limón fresco y poca azúcar · 12 oz",
+    descriptionEn: "Fresh lime and light sugar · 12 oz",
+    category: "Bebidas",
+    price: 3500,
+    emoji: "🍋",
+    tone: "gold",
+  },
+  {
+    id: "naranja",
+    name: "Jugo de naranja",
+    nameEn: "Orange juice",
+    description: "Jugo de naranja · 10 oz",
+    descriptionEn: "Orange juice · 10 oz",
+    category: "Bebidas",
+    price: 4000,
+    emoji: "🍊",
+    tone: "sunset",
+  },
+  {
+    id: "leche-chocolate",
+    name: "Leche con chocolate",
+    nameEn: "Chocolate milk",
+    description: "Leche fría con cacao · 8 oz",
+    descriptionEn: "Cold cocoa milk · 8 oz",
+    category: "Bebidas",
+    price: 4000,
+    emoji: "🥛",
+    tone: "berry",
+  },
+  {
+    id: "taco-tuesday",
+    name: "Taco Tuesday",
+    nameEn: "Taco Tuesday",
+    description: "Combo de tacos, arroz y bebida del día",
+    descriptionEn: "Taco combo with rice and drink of the day",
+    category: "Especiales",
+    price: 14500,
+    badge: "Especial",
+    emoji: "🌮",
+    tone: "terracotta",
+  },
+  {
+    id: "pizza-friday",
+    name: "Viernes de pizza",
+    nameEn: "Pizza Friday",
+    description: "Pizza personal de queso con fruta",
+    descriptionEn: "Personal cheese pizza with fruit",
+    category: "Especiales",
+    price: 14000,
+    badge: "Viernes",
+    emoji: "🍕",
+    tone: "sunset",
+  },
+  {
+    id: "vegetariano",
+    name: "Bowl vegetariano",
+    nameEn: "Vegetarian bowl",
+    description: "Arroz, frijoles, vegetales y aguacate",
+    descriptionEn: "Rice, beans, vegetables and avocado",
+    category: "Especiales",
+    price: 12000,
+    badge: "Vegetariano",
+    emoji: "🥗",
+    tone: "avocado",
+  },
+  {
+    id: "cumpleanos",
+    name: "Combo de cumpleaños",
+    nameEn: "Birthday combo",
+    description: "Mini hamburguesa, papas horneadas y postre",
+    descriptionEn: "Mini burger, baked fries and dessert",
+    category: "Especiales",
+    price: 15500,
+    badge: "Celebración",
+    emoji: "🎉",
+    tone: "berry",
+  },
+  {
+    id: "chef",
+    name: "Especial del chef",
+    nameEn: "Chef special",
+    description: "Platillo rotativo preparado para la semana",
+    descriptionEn: "Rotating weekly chef special",
+    category: "Especiales",
+    price: 15000,
+    badge: "Semanal",
+    emoji: "👨‍🍳",
+    tone: "gold",
+  },
+  {
     id: "jamaica",
     name: "Agua de jamaica",
     nameEn: "Hibiscus water",
@@ -140,7 +362,7 @@ const initialKdsOrders: KdsOrder[] = [
     student: "Sofía M.",
     classroom: "3° B · Aula 12",
     dish: "Quesadilla de pollo",
-    time: "11:35",
+    time: "11:30",
     stage: "Nuevas",
   },
   {
@@ -148,7 +370,7 @@ const initialKdsOrders: KdsOrder[] = [
     student: "Daniela R.",
     classroom: "2° A · Aula 7",
     dish: "Bowl mexicano",
-    time: "11:35",
+    time: "11:30",
     stage: "Nuevas",
     allergy: "Sin lácteos",
   },
@@ -157,7 +379,7 @@ const initialKdsOrders: KdsOrder[] = [
     student: "Mateo M.",
     classroom: "Kinder A · Norte",
     dish: "Taquitos suaves",
-    time: "11:20",
+    time: "11:30",
     stage: "Preparando",
   },
   {
@@ -165,7 +387,7 @@ const initialKdsOrders: KdsOrder[] = [
     student: "Valentina P.",
     classroom: "4° C · Aula 18",
     dish: "Quesadilla de pollo",
-    time: "11:20",
+    time: "11:30",
     stage: "Listas",
   },
   {
@@ -173,7 +395,7 @@ const initialKdsOrders: KdsOrder[] = [
     student: "Lucas A.",
     classroom: "1° B · Aula 4",
     dish: "Bowl mexicano",
-    time: "11:20",
+    time: "11:30",
     stage: "Empacadas",
   },
 ];
@@ -201,8 +423,8 @@ const ui = {
     greeting: "¡Hola, Daniela!",
     subtitle: "¿Para quién preparamos algo rico?",
     delivery: "Entrega programada",
-    school: "Escuela Bilingüe Los Pinos",
-    period: "Almuerzo · 11:35 a. m.",
+    school: "Escuela Internacional Sampedrana (EIS)",
+    period: "Almuerzo · 11:30 a. m.",
     menu: "Menú de la semana",
     menuHelp: "Preparado fresco cada mañana",
     add: "Agregar",
@@ -223,8 +445,8 @@ const ui = {
     greeting: "Hi, Daniela!",
     subtitle: "Who are we cooking something delicious for?",
     delivery: "Scheduled delivery",
-    school: "Los Pinos Bilingual School",
-    period: "Lunch · 11:35 a.m.",
+    school: "Escuela Internacional Sampedrana (EIS)",
+    period: "Lunch · 11:30 a.m.",
     menu: "This week’s menu",
     menuHelp: "Prepared fresh every morning",
     add: "Add",
@@ -239,12 +461,14 @@ const ui = {
   },
 };
 
-export function PrototypeApp() {
-  const [surface, setSurface] = useState<Surface>("family");
+export function PrototypeApp({ initialSurface = "family" }: { initialSurface?: Surface }) {
+  const [surface] = useState<Surface>(initialSurface);
   const [language, setLanguage] = useState<Language>("es");
   const [studentId, setStudentId] = useState(students[0].id);
   const [selectedDate, setSelectedDate] = useState("12");
   const [category, setCategory] = useState<Category>("Todos");
+  const [serviceType, setServiceType] = useState<ServiceType>("lunch");
+  const [orderNotes, setOrderNotes] = useState("");
   const [cart, setCart] = useState<Record<string, number>>({});
   const [cartOpen, setCartOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -312,6 +536,7 @@ export function PrototypeApp() {
     setCart({});
     setConfirmed(false);
     setCategory("Todos");
+    setOrderNotes("");
   };
 
   const requestInstall = async () => {
@@ -344,25 +569,16 @@ export function PrototypeApp() {
     <main className="app-shell">
       <PrototypeBanner label={t.prototype} />
       <header className="topbar">
-        <button className="brand" onClick={() => setSurface("family")} aria-label="Ir al inicio">
+        <a className="brand" href={surface === "family" ? "/" : surface === "admin" ? "/admin" : "/cocina"} aria-label="Ir al inicio">
           <Image src="/logo-solo-mexico.png" alt="Solo México" width={600} height={299} unoptimized />
           <span>
             <strong>Lonchera</strong>
             <small>Solo México</small>
           </span>
-        </button>
+        </a>
 
-        <div className="surface-switch" aria-label={t.demo}>
-          {(["family", "admin", "kitchen"] as Surface[]).map((item) => (
-            <button
-              key={item}
-              className={surface === item ? "active" : ""}
-              onClick={() => setSurface(item)}
-              aria-pressed={surface === item}
-            >
-              {item === "family" ? t.family : item === "admin" ? t.admin : t.kitchen}
-            </button>
-          ))}
+        <div className="surface-label">
+          {surface === "admin" ? t.admin : surface === "kitchen" ? t.kitchen : "EIS"}
         </div>
 
         <div className="top-actions">
@@ -383,6 +599,8 @@ export function PrototypeApp() {
           t={t}
           language={language}
           currentStudent={currentStudent}
+          serviceType={serviceType}
+          setServiceType={setServiceType}
           studentId={studentId}
           setStudentId={setStudentId}
           selectedDate={selectedDate}
@@ -410,6 +628,9 @@ export function PrototypeApp() {
           cart={cart}
           total={cartTotal}
           student={currentStudent}
+          serviceType={serviceType}
+          orderNotes={orderNotes}
+          setOrderNotes={setOrderNotes}
           close={() => setCartOpen(false)}
           updateQuantity={updateQuantity}
           confirm={confirmOrder}
@@ -447,6 +668,8 @@ type FamilyViewProps = {
   t: (typeof ui)[Language];
   language: Language;
   currentStudent: Student;
+  serviceType: ServiceType;
+  setServiceType: (service: ServiceType) => void;
   studentId: string;
   setStudentId: (id: string) => void;
   selectedDate: string;
@@ -466,6 +689,8 @@ function FamilyView({
   t,
   language,
   currentStudent,
+  serviceType,
+  setServiceType,
   studentId,
   setStudentId,
   selectedDate,
@@ -519,6 +744,9 @@ function FamilyView({
               <span className="student-copy">
                 <strong>{student.name}</strong>
                 <small>{student.detail}</small>
+                {student.allergies.length > 0 && (
+                  <em className="student-allergy">⚠ {student.allergies.join(", ")}</em>
+                )}
               </span>
               <span className="selection-mark" aria-hidden="true">
                 {studentId === student.id ? "✓" : ""}
@@ -528,14 +756,40 @@ function FamilyView({
         </div>
       </section>
 
+      <section className={`allergy-profile ${currentStudent.allergies.length ? "has-allergies" : ""}`}>
+        <span aria-hidden="true">{currentStudent.allergies.length ? "⚠" : "✓"}</span>
+        <div>
+          <strong>{language === "es" ? "Alergias del perfil" : "Profile allergies"}</strong>
+          <p>
+            {currentStudent.allergies.length
+              ? currentStudent.allergies.join(", ")
+              : language === "es" ? "No hay alergias registradas" : "No allergies registered"}
+          </p>
+          <small>
+            {language === "es"
+              ? "Se adjuntarán automáticamente a cada pedido."
+              : "They will be attached automatically to every order."}
+          </small>
+        </div>
+        <button>{language === "es" ? "Editar perfil" : "Edit profile"}</button>
+      </section>
+
       <section className="schedule-card" aria-labelledby="schedule-title">
         <div className="schedule-icon" aria-hidden="true">🕐</div>
         <div>
           <p>{t.delivery}</p>
           <h2 id="schedule-title">{t.school}</h2>
-          <span>{t.period} · {currentStudent.detail}</span>
+          <span>
+            {serviceType === "breakfast"
+              ? language === "es" ? "Desayuno · 9:00 a. m. · Cierra 8:15 a. m." : "Breakfast · 9:00 a.m. · Closes 8:15 a.m."
+              : language === "es" ? "Almuerzo · 11:30 a. m. · Cierra 10:00 a. m." : "Lunch · 11:30 a.m. · Closes 10:00 a.m."}
+            {` · ${currentStudent.detail}`}
+          </span>
         </div>
-        <button>{language === "es" ? "Cambiar" : "Change"}</button>
+        <div className="service-toggle" aria-label={language === "es" ? "Tiempo de comida" : "Meal period"}>
+          <button className={serviceType === "breakfast" ? "active" : ""} onClick={() => setServiceType("breakfast")}>9:00</button>
+          <button className={serviceType === "lunch" ? "active" : ""} onClick={() => setServiceType("lunch")}>11:30</button>
+        </div>
       </section>
 
       <section aria-labelledby="date-title">
@@ -574,7 +828,7 @@ function FamilyView({
         </div>
 
         <div className="category-row" aria-label="Categorías de comida">
-          {(["Todos", "Desayunos", "Almuerzos", "Bebidas"] as Category[]).map((item) => (
+          {(["Todos", "Desayunos", "Almuerzos", "Postres", "Bebidas", "Especiales"] as Category[]).map((item) => (
             <button
               key={item}
               className={category === item ? "active" : ""}
@@ -582,7 +836,7 @@ function FamilyView({
               aria-pressed={category === item}
             >
               {language === "en"
-                ? { Todos: "All", Desayunos: "Breakfast", Almuerzos: "Lunch", Bebidas: "Drinks" }[item]
+                ? { Todos: "All", Desayunos: "Breakfast", Almuerzos: "Lunch", Postres: "Desserts", Bebidas: "Drinks", Especiales: "Specials" }[item]
                 : item}
             </button>
           ))}
@@ -703,7 +957,7 @@ function AdminView({ showToast }: { showToast: (message: string) => void }) {
 
         <section className="panel today-panel">
           <div className="panel-title">
-            <div><span className="panel-icon">▦</span><div><h2>Menú de hoy</h2><p>Escuela Bilingüe Los Pinos</p></div></div>
+              <div><span className="panel-icon">▦</span><div><h2>Menú de hoy</h2><p>Escuela Internacional Sampedrana (EIS)</p></div></div>
             <button className="text-button">Editar</button>
           </div>
           <div className="menu-summary-list">
@@ -767,13 +1021,13 @@ function KitchenView({ orders, advanceOrder, showToast }: { orders: KdsOrder[]; 
     <div className="kds-page">
       <section className="kds-toolbar">
         <div>
-          <p className="eyebrow">KDS · ESCUELA LOS PINOS</p>
+          <p className="eyebrow">KDS · EIS</p>
           <h1>Servicio de almuerzo</h1>
           <span><i /> Conectado · actualización en vivo</span>
         </div>
         <div className="kds-stats">
           <div><small>Pendientes</small><strong>{count}</strong></div>
-          <div><small>Hora de salida</small><strong>11:10</strong></div>
+          <div><small>Hora de entrega</small><strong>11:30</strong></div>
           <button onClick={() => showToast("Hoja de producción preparada")}>▤ Hoja de producción</button>
         </div>
       </section>
@@ -821,6 +1075,9 @@ function CartDialog({
   cart,
   total,
   student,
+  serviceType,
+  orderNotes,
+  setOrderNotes,
   close,
   updateQuantity,
   confirm,
@@ -830,6 +1087,9 @@ function CartDialog({
   cart: Record<string, number>;
   total: number;
   student: Student;
+  serviceType: ServiceType;
+  orderNotes: string;
+  setOrderNotes: (notes: string) => void;
   close: () => void;
   updateQuantity: (id: string, delta: number) => void;
   confirm: () => void;
@@ -842,7 +1102,11 @@ function CartDialog({
           <div><p>PEDIDO PARA</p><h2 id="cart-title">{student.name}</h2><span>{student.detail}</span></div>
           <button className="close-button" onClick={close} aria-label="Cerrar">×</button>
         </header>
-        <div className="cart-schedule"><span>▦</span><div><strong>Miércoles, 12 de agosto</strong><small>Almuerzo · 11:35 a. m.</small></div></div>
+        <div className="cart-schedule"><span>▦</span><div><strong>Miércoles, 12 de agosto · EIS</strong><small>{serviceType === "breakfast" ? "Desayuno · 9:00 a. m." : "Almuerzo · 11:30 a. m."}</small></div></div>
+        <div className={`cart-allergies ${student.allergies.length ? "warning" : ""}`}>
+          <strong>{student.allergies.length ? "⚠ Alergias del perfil" : "✓ Sin alergias registradas"}</strong>
+          {student.allergies.length > 0 && <span>{student.allergies.join(", ")}</span>}
+        </div>
         <div className="cart-items">
           {Object.entries(cart).map(([id, quantity]) => {
             const dish = dishes.find((item) => item.id === id);
@@ -856,6 +1120,16 @@ function CartDialog({
             );
           })}
         </div>
+        <label className="order-notes">
+          <span>Cambios o instrucciones para este pedido</span>
+          <textarea
+            value={orderNotes}
+            onChange={(event) => setOrderNotes(event.target.value)}
+            maxLength={300}
+            placeholder="Ej.: queso aparte, sin salsa o entregar en recepción"
+          />
+          <small>{orderNotes.length}/300 · No reemplaza la información de alergias del perfil</small>
+        </label>
         <div className="cart-total"><span>Total</span><strong>{money.format(total / 100)}</strong></div>
         <div className="no-payment-note"><span>✓</span><p><strong>Prototipo sin cobro</strong><br />No se solicitará información de tarjeta.</p></div>
         <button className="confirm-button" onClick={confirm}>{t.confirm} <span>→</span></button>
@@ -874,7 +1148,7 @@ function ConfirmationDialog({ t, student, total, close }: { t: (typeof ui)[Langu
         <p>{t.confirmedHelp}</p>
         <div className="success-ticket">
           <div><span>Para</span><strong>{student.name}</strong></div>
-          <div><span>Entrega</span><strong>Mié 12 · 11:35 a. m.</strong></div>
+          <div><span>Entrega</span><strong>Mié 12 · 11:30 a. m. · EIS</strong></div>
           <div><span>Total de referencia</span><strong>{money.format(total / 100)}</strong></div>
           <div className="delivery-code"><span>Código de entrega</span><strong>28 51</strong></div>
         </div>

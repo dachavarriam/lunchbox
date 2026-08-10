@@ -1,0 +1,42 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "lonchera-solo-mexico",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-08-08",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "solomexico",
+      "database_id": "3e1bd337-7944-4f46-a157-9039cd569ddf",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "solomexico"
+    }
+  ],
+  "vars": {
+    "PUBLIC_MEDIA_BASE_URL": "https://media.solomexicohn.com",
+    "DEFAULT_SCHOOL_SLUG": "eis",
+    "DEFAULT_LOCALE": "es-HN",
+    "DEFAULT_CURRENCY": "HNL"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  }
+}

@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render() {
+async function render(pathname = "/") {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
 
   return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
+    new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } }),
     {
       ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
     },
@@ -24,11 +24,28 @@ test("renders the branded Lonchera prototype", async () => {
   const html = await response.text();
   assert.match(html, /<title>Lonchera Solo México<\/title>/i);
   assert.match(html, /Datos de demostración/);
-  assert.match(html, /Familias/);
-  assert.match(html, /Administración/);
-  assert.match(html, /Cocina/);
+  assert.match(html, /Escuela Internacional Sampedrana/);
+  assert.match(html, /Alergias del perfil/);
+  assert.match(html, /Postres/);
+  assert.match(html, /Especiales/);
   assert.match(html, /Menú de la semana/);
+  assert.doesNotMatch(html, /Administración|KDS · EIS/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/i);
+});
+
+test("keeps family, admin and kitchen surfaces on separate routes", async () => {
+  const [family, admin, kitchen] = await Promise.all([
+    render("/").then((response) => response.text()),
+    render("/admin").then((response) => response.text()),
+    render("/cocina").then((response) => response.text()),
+  ]);
+
+  assert.match(family, /Elige a tu estudiante/);
+  assert.doesNotMatch(family, /Importación masiva|Servicio de almuerzo/);
+  assert.match(admin, /Importación masiva/);
+  assert.doesNotMatch(admin, /Elige a tu estudiante|Servicio de almuerzo/);
+  assert.match(kitchen, /KDS · EIS/);
+  assert.doesNotMatch(kitchen, /Elige a tu estudiante|Importación masiva/);
 });
 
 test("ships the local PWA assets and pnpm policy", async () => {
