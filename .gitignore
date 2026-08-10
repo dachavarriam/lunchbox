@@ -1,0 +1,14 @@
+# Local Codex project settings may contain credentials.
+.codex/config.toml
+
+# Dependencies and local build output
+node_modules/
+.pnpm-store/
+.next/
+dist/
+.wrangler/
+.vinext/
+.env*
+!.env.example
+.DS_Store
+*.tsbuildinfo

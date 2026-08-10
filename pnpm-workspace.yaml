@@ -1,0 +1,11 @@
+packages:
+  - "."
+
+# Dependencies are installed explicitly; commands never mutate node_modules.
+verifyDepsBeforeRun: false
+
+allowBuilds:
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+  workerd: true

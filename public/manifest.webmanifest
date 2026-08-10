@@ -1,0 +1,19 @@
+{
+  "name": "Lonchera Solo México",
+  "short_name": "Lonchera",
+  "description": "Pedidos escolares de Solo México",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f8fc",
+  "theme_color": "#173b76",
+  "lang": "es-HN",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-600.png",
+      "sizes": "600x600",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
