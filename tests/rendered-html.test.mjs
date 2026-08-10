@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
 async function render(pathname = "/") {
@@ -49,14 +49,17 @@ test("keeps family, admin and kitchen surfaces on separate routes", async () => 
 });
 
 test("ships the local PWA assets and pnpm policy", async () => {
-  const [manifestText, serviceWorker, packageText, workspaceText] = await Promise.all([
+  const [manifestText, serviceWorker, packageText, workspaceText, wranglerText, clientAssets] = await Promise.all([
     readFile(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../pnpm-workspace.yaml", import.meta.url), "utf8"),
+    readFile(new URL("../wrangler.jsonc", import.meta.url), "utf8"),
+    readdir(new URL("../dist/client/assets/", import.meta.url)),
   ]);
   const manifest = JSON.parse(manifestText);
   const packageJson = JSON.parse(packageText);
+  const wranglerConfig = JSON.parse(wranglerText);
 
   assert.equal(manifest.name, "Lonchera Solo México");
   assert.equal(manifest.display, "standalone");
@@ -64,4 +67,6 @@ test("ships the local PWA assets and pnpm policy", async () => {
   assert.equal(packageJson.packageManager, "pnpm@11.21.0");
   assert.match(workspaceText, /allowBuilds:/);
   assert.doesNotMatch(packageText, /react-loading-skeleton|drizzle/);
+  assert.equal(wranglerConfig.assets.run_worker_first, undefined);
+  assert.ok(clientAssets.some((asset) => asset.endsWith(".css")), "production build must emit CSS");
 });
