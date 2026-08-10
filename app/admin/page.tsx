@@ -1,5 +1,5 @@
 import { PrototypeApp } from "../prototype-app";
 
 export default function AdminPage() {
-  return <PrototypeApp initialSurface="admin" />;
+  return <PrototypeApp initialSurface="admin" nowIso={new Date().toISOString()} />;
 }

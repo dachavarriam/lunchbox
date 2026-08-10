@@ -9,6 +9,12 @@ type Category = "Todos" | "Desayunos" | "Almuerzos" | "Postres" | "Bebidas" | "E
 type ServiceType = "breakfast" | "lunch";
 type KdsStage = "Nuevas" | "Preparando" | "Listas" | "Empacadas";
 
+type ServiceDate = {
+  id: string;
+  day: string;
+  date: string;
+};
+
 type Dish = {
   id: string;
   name: string;
@@ -400,13 +406,66 @@ const initialKdsOrders: KdsOrder[] = [
   },
 ];
 
-const dates = [
-  { day: "LUN", date: "10" },
-  { day: "MAR", date: "11" },
-  { day: "MIÉ", date: "12" },
-  { day: "JUE", date: "13" },
-  { day: "VIE", date: "14" },
-];
+const APP_TIME_ZONE = "America/Tegucigalpa";
+
+function formatDateId(date: Date): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
+function getServiceDates(now: Date): ServiceDate[] {
+  const result: ServiceDate[] = [];
+
+  for (let offset = 0; result.length < 5 && offset < 14; offset += 1) {
+    const candidate = new Date(now.getTime() + offset * 86_400_000);
+    const weekday = new Intl.DateTimeFormat("en-US", {
+      timeZone: APP_TIME_ZONE,
+      weekday: "short",
+    }).format(candidate);
+    if (weekday === "Sat" || weekday === "Sun") continue;
+
+    result.push({
+      id: formatDateId(candidate),
+      day: new Intl.DateTimeFormat("es-HN", {
+        timeZone: APP_TIME_ZONE,
+        weekday: "short",
+      }).format(candidate).replace(".", "").toLocaleUpperCase("es-HN"),
+      date: new Intl.DateTimeFormat("es-HN", {
+        timeZone: APP_TIME_ZONE,
+        day: "numeric",
+      }).format(candidate),
+    });
+  }
+
+  return result;
+}
+
+function formatLongDate(date: Date, language: Language): string {
+  const locale = language === "es" ? "es-HN" : "en-US";
+  return new Intl.DateTimeFormat(locale, {
+    timeZone: APP_TIME_ZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date).toLocaleUpperCase(locale);
+}
+
+function formatDateIdLabel(dateId: string, language: Language): string {
+  const date = new Date(`${dateId}T12:00:00Z`);
+  return new Intl.DateTimeFormat(language === "es" ? "es-HN" : "en-US", {
+    timeZone: APP_TIME_ZONE,
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+  }).format(date);
+}
 
 const money = new Intl.NumberFormat("es-HN", {
   style: "currency",
@@ -461,11 +520,13 @@ const ui = {
   },
 };
 
-export function PrototypeApp({ initialSurface = "family" }: { initialSurface?: Surface }) {
+export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSurface?: Surface; nowIso: string }) {
+  const now = useMemo(() => new Date(nowIso), [nowIso]);
+  const serviceDates = useMemo(() => getServiceDates(now), [now]);
   const [surface] = useState<Surface>(initialSurface);
   const [language, setLanguage] = useState<Language>("es");
   const [studentId, setStudentId] = useState(students[0].id);
-  const [selectedDate, setSelectedDate] = useState("12");
+  const [selectedDate, setSelectedDate] = useState(() => serviceDates[0]?.id ?? formatDateId(now));
   const [category, setCategory] = useState<Category>("Todos");
   const [serviceType, setServiceType] = useState<ServiceType>("lunch");
   const [orderNotes, setOrderNotes] = useState("");
@@ -477,6 +538,9 @@ export function PrototypeApp({ initialSurface = "family" }: { initialSurface?: S
   const [kdsOrders, setKdsOrders] = useState(initialKdsOrders);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const t = ui[language];
+  const todayLabel = formatLongDate(now, language);
+  const selectedDateLabel = formatDateIdLabel(selectedDate, language);
+  const todayId = formatDateId(now);
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -599,6 +663,9 @@ export function PrototypeApp({ initialSurface = "family" }: { initialSurface?: S
           t={t}
           language={language}
           currentStudent={currentStudent}
+          todayLabel={todayLabel}
+          todayId={todayId}
+          serviceDates={serviceDates}
           serviceType={serviceType}
           setServiceType={setServiceType}
           studentId={studentId}
@@ -616,7 +683,7 @@ export function PrototypeApp({ initialSurface = "family" }: { initialSurface?: S
           openCart={() => setCartOpen(true)}
         />
       )}
-      {surface === "admin" && <AdminView showToast={showToast} />}
+      {surface === "admin" && <AdminView showToast={showToast} todayLabel={todayLabel} />}
       {surface === "kitchen" && (
         <KitchenView orders={kdsOrders} advanceOrder={advanceOrder} showToast={showToast} />
       )}
@@ -628,6 +695,7 @@ export function PrototypeApp({ initialSurface = "family" }: { initialSurface?: S
           cart={cart}
           total={cartTotal}
           student={currentStudent}
+          selectedDateLabel={selectedDateLabel}
           serviceType={serviceType}
           orderNotes={orderNotes}
           setOrderNotes={setOrderNotes}
@@ -642,6 +710,8 @@ export function PrototypeApp({ initialSurface = "family" }: { initialSurface?: S
           t={t}
           student={currentStudent}
           total={cartTotal}
+          selectedDateLabel={selectedDateLabel}
+          serviceType={serviceType}
           close={startAnotherOrder}
         />
       )}
@@ -668,6 +738,9 @@ type FamilyViewProps = {
   t: (typeof ui)[Language];
   language: Language;
   currentStudent: Student;
+  todayLabel: string;
+  todayId: string;
+  serviceDates: ServiceDate[];
   serviceType: ServiceType;
   setServiceType: (service: ServiceType) => void;
   studentId: string;
@@ -689,6 +762,9 @@ function FamilyView({
   t,
   language,
   currentStudent,
+  todayLabel,
+  todayId,
+  serviceDates,
   serviceType,
   setServiceType,
   studentId,
@@ -709,7 +785,7 @@ function FamilyView({
     <div className="family-page page-content">
       <section className="intro-row">
         <div>
-          <p className="eyebrow">MIÉRCOLES, 12 DE AGOSTO</p>
+          <p className="eyebrow">{todayLabel}</p>
           <h1>{t.greeting}</h1>
           <p>{t.subtitle}</p>
         </div>
@@ -801,16 +877,16 @@ function FamilyView({
           <span className="availability"><i /> {language === "es" ? "Pedidos abiertos" : "Orders open"}</span>
         </div>
         <div className="date-strip">
-          {dates.map((date) => (
+          {serviceDates.map((date) => (
             <button
-              key={date.date}
-              className={selectedDate === date.date ? "selected" : ""}
-              onClick={() => setSelectedDate(date.date)}
-              aria-pressed={selectedDate === date.date}
+              key={date.id}
+              className={selectedDate === date.id ? "selected" : ""}
+              onClick={() => setSelectedDate(date.id)}
+              aria-pressed={selectedDate === date.id}
             >
               <small>{date.day}</small>
               <strong>{date.date}</strong>
-              {date.date === "12" && <span>{language === "es" ? "HOY" : "TODAY"}</span>}
+              {date.id === todayId ? <span>{language === "es" ? "HOY" : "TODAY"}</span> : null}
             </button>
           ))}
         </div>
@@ -896,7 +972,7 @@ function FamilyView({
   );
 }
 
-function AdminView({ showToast }: { showToast: (message: string) => void }) {
+function AdminView({ showToast, todayLabel }: { showToast: (message: string) => void; todayLabel: string }) {
   const [imported, setImported] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -909,7 +985,7 @@ function AdminView({ showToast }: { showToast: (message: string) => void }) {
     <div className="ops-page page-content">
       <section className="ops-heading">
         <div>
-          <p className="eyebrow">OPERACIÓN · MIÉRCOLES 12 DE AGOSTO</p>
+          <p className="eyebrow">OPERACIÓN · {todayLabel}</p>
           <h1>Buenos días, Daniela</h1>
           <p>Todo lo importante para la jornada de hoy.</p>
         </div>
@@ -1075,6 +1151,7 @@ function CartDialog({
   cart,
   total,
   student,
+  selectedDateLabel,
   serviceType,
   orderNotes,
   setOrderNotes,
@@ -1087,6 +1164,7 @@ function CartDialog({
   cart: Record<string, number>;
   total: number;
   student: Student;
+  selectedDateLabel: string;
   serviceType: ServiceType;
   orderNotes: string;
   setOrderNotes: (notes: string) => void;
@@ -1102,7 +1180,7 @@ function CartDialog({
           <div><p>PEDIDO PARA</p><h2 id="cart-title">{student.name}</h2><span>{student.detail}</span></div>
           <button className="close-button" onClick={close} aria-label="Cerrar">×</button>
         </header>
-        <div className="cart-schedule"><span>▦</span><div><strong>Miércoles, 12 de agosto · EIS</strong><small>{serviceType === "breakfast" ? "Desayuno · 9:00 a. m." : "Almuerzo · 11:30 a. m."}</small></div></div>
+        <div className="cart-schedule"><span>▦</span><div><strong>{selectedDateLabel} · EIS</strong><small>{serviceType === "breakfast" ? "Desayuno · 9:00 a. m." : "Almuerzo · 11:30 a. m."}</small></div></div>
         <div className={`cart-allergies ${student.allergies.length ? "warning" : ""}`}>
           <strong>{student.allergies.length ? "⚠ Alergias del perfil" : "✓ Sin alergias registradas"}</strong>
           {student.allergies.length > 0 && <span>{student.allergies.join(", ")}</span>}
@@ -1138,7 +1216,7 @@ function CartDialog({
   );
 }
 
-function ConfirmationDialog({ t, student, total, close }: { t: (typeof ui)[Language]; student: Student; total: number; close: () => void }) {
+function ConfirmationDialog({ t, student, total, selectedDateLabel, serviceType, close }: { t: (typeof ui)[Language]; student: Student; total: number; selectedDateLabel: string; serviceType: ServiceType; close: () => void }) {
   return (
     <div className="modal-backdrop success-backdrop">
       <section className="success-dialog" role="dialog" aria-modal="true" aria-labelledby="success-title">
@@ -1148,7 +1226,7 @@ function ConfirmationDialog({ t, student, total, close }: { t: (typeof ui)[Langu
         <p>{t.confirmedHelp}</p>
         <div className="success-ticket">
           <div><span>Para</span><strong>{student.name}</strong></div>
-          <div><span>Entrega</span><strong>Mié 12 · 11:30 a. m. · EIS</strong></div>
+          <div><span>Entrega</span><strong>{selectedDateLabel} · {serviceType === "breakfast" ? "9:00 a. m." : "11:30 a. m."} · EIS</strong></div>
           <div><span>Total de referencia</span><strong>{money.format(total / 100)}</strong></div>
           <div className="delivery-code"><span>Código de entrega</span><strong>28 51</strong></div>
         </div>

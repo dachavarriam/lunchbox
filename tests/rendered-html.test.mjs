@@ -22,7 +22,16 @@ test("renders the branded Lonchera prototype", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
+  const expectedToday = new Intl.DateTimeFormat("es-HN", {
+    timeZone: "America/Tegucigalpa",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date()).toLocaleUpperCase("es-HN");
   assert.match(html, /<title>Lonchera Solo México<\/title>/i);
+  assert.ok(html.includes(expectedToday), `expected Honduras date ${expectedToday}`);
+  assert.doesNotMatch(html, /MIÉRCOLES, 12 DE AGOSTO/);
   assert.match(html, /Datos de demostración/);
   assert.match(html, /Escuela Internacional Sampedrana/);
   assert.match(html, /Alergias del perfil/);
