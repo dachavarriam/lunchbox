@@ -5,7 +5,7 @@ import Image from "next/image";
 
 type Surface = "family" | "admin" | "kitchen";
 type Language = "es" | "en";
-type Category = "Todos" | "Desayunos" | "Almuerzos" | "Postres" | "Bebidas" | "Especiales";
+type Category = "Todos" | "Menú permanente" | "Bebidas" | "Especialidades";
 type ServiceType = "breakfast" | "lunch";
 type KdsStage = "Nuevas" | "Preparando" | "Listas" | "Empacadas";
 
@@ -26,6 +26,22 @@ type Dish = {
   badge?: string;
   emoji: string;
   tone: string;
+  optionGroups?: OptionGroup[];
+};
+
+type OptionGroup = {
+  id: string;
+  name: string;
+  nameEn: string;
+  options: Array<{ id: string; name: string; nameEn: string }>;
+};
+
+type CartItem = {
+  key: string;
+  dishId: string;
+  quantity: number;
+  selections: Record<string, string>;
+  notes: string;
 };
 
 type Student = {
@@ -71,179 +87,87 @@ const students: Student[] = [
   },
 ];
 
+const meatOptions = (items: Array<[string, string, string]>) => [{
+  id: "protein",
+  name: "Elige la preparación",
+  nameEn: "Choose the filling",
+  options: items.map(([id, name, nameEn]) => ({ id, name, nameEn })),
+}];
+
 const dishes: Dish[] = [
   {
-    id: "quesadilla",
-    name: "Quesadilla de pollo",
-    nameEn: "Chicken quesadilla",
-    description: "Pollo, queso, frijoles y pico de gallo",
-    descriptionEn: "Chicken, cheese, beans and pico de gallo",
-    category: "Almuerzos",
-    price: 11500,
-    badge: "Favorito",
-    emoji: "🌮",
-    tone: "sunset",
+    id: "chilaquiles", name: "Chilaquiles", nameEn: "Chilaquiles",
+    description: "Totopos bañados en salsa, crema, queso y la preparación que elijas.",
+    descriptionEn: "Tortilla chips with salsa, cream, cheese and your chosen topping.",
+    category: "Menú permanente", price: 14500, badge: "Siempre disponible", emoji: "🍳", tone: "avocado",
+    optionGroups: [
+      { id: "salsa", name: "Elige tu salsa", nameEn: "Choose your salsa", options: [
+        { id: "verde", name: "Salsa verde", nameEn: "Green salsa" },
+        { id: "roja", name: "Salsa roja", nameEn: "Red salsa" },
+      ] },
+      ...meatOptions([
+        ["pollo", "Pollo", "Chicken"], ["pastor", "Pastor", "Al pastor"],
+        ["huevo", "Huevo", "Egg"], ["res", "Res", "Beef"],
+      ]),
+    ],
   },
   {
-    id: "bowl",
-    name: "Bowl mexicano",
-    nameEn: "Mexican bowl",
-    description: "Arroz, pollo, maíz, frijoles y aguacate",
-    descriptionEn: "Rice, chicken, corn, beans and avocado",
-    category: "Almuerzos",
-    price: 12500,
-    badge: "Balanceado",
-    emoji: "🥑",
-    tone: "avocado",
+    id: "tacos", name: "Tacos", nameEn: "Tacos",
+    description: "Tacos preparados al momento con la carne que prefieras.",
+    descriptionEn: "Freshly prepared tacos with your choice of filling.",
+    category: "Menú permanente", price: 13500, badge: "Favorito", emoji: "🌮", tone: "terracotta",
+    optionGroups: meatOptions([
+      ["pastor", "Pastor", "Al pastor"], ["chilorio-pollo", "Chilorio de pollo", "Chicken chilorio"],
+      ["chorizo", "Chorizo", "Chorizo"], ["res", "Res", "Beef"],
+      ["cochinita-pibil", "Cochinita pibil", "Cochinita pibil"],
+    ]),
   },
   {
-    id: "tacos",
-    name: "Taquitos suaves",
-    nameEn: "Soft tacos",
-    description: "Tres taquitos de pollo con arroz",
-    descriptionEn: "Three chicken tacos with rice",
-    category: "Almuerzos",
-    price: 11000,
-    badge: "Nuevo",
-    emoji: "🌯",
-    tone: "terracotta",
+    id: "nachos", name: "Nachos", nameEn: "Nachos",
+    description: "Totopos crujientes con frijoles, queso y tu carne favorita.",
+    descriptionEn: "Crispy tortilla chips with beans, cheese and your favorite meat.",
+    category: "Menú permanente", price: 13000, emoji: "🧀", tone: "gold",
+    optionGroups: meatOptions([["pollo", "Pollo", "Chicken"], ["pastor", "Pastor", "Al pastor"], ["res", "Res", "Beef"]]),
   },
   {
-    id: "pancakes",
-    name: "Mini pancakes",
-    nameEn: "Mini pancakes",
-    description: "Con banano, miel y yogurt natural",
-    descriptionEn: "With banana, honey and plain yogurt",
-    category: "Desayunos",
-    price: 8500,
-    badge: "Desayuno",
-    emoji: "🥞",
-    tone: "berry",
+    id: "enchiladas", name: "Enchiladas", nameEn: "Enchiladas",
+    description: "Enchiladas mexicanas con crema, queso y salsa a elección.",
+    descriptionEn: "Mexican enchiladas with cream, cheese and your choice of salsa.",
+    category: "Menú permanente", price: 12500, emoji: "🫔", tone: "sunset",
+    optionGroups: [{ id: "salsa", name: "Elige tu salsa", nameEn: "Choose your salsa", options: [
+      { id: "verde", name: "Salsa verde", nameEn: "Green salsa" },
+      { id: "roja", name: "Salsa roja", nameEn: "Red salsa" },
+    ] }],
   },
   {
-    id: "molletes",
-    name: "Molletes escolares",
-    nameEn: "School molletes",
-    description: "Pan horneado, frijoles, queso y fruta",
-    descriptionEn: "Baked bread, beans, cheese and fruit",
-    category: "Desayunos",
-    price: 9000,
-    emoji: "🥖",
-    tone: "gold",
+    id: "sopa-tesposteca", name: "Sopa Tesposteca", nameEn: "Tesposteca soup",
+    description: "Sopa tradicional mexicana servida caliente.",
+    descriptionEn: "Traditional Mexican soup served warm.",
+    category: "Menú permanente", price: 15500, emoji: "🍲", tone: "berry",
   },
   {
-    id: "baleada",
-    name: "Baleada escolar",
-    nameEn: "School baleada",
-    description: "Frijoles, queso y huevo en tortilla de harina",
-    descriptionEn: "Beans, cheese and egg in a flour tortilla",
-    category: "Desayunos",
-    price: 7500,
-    badge: "Catracha",
-    emoji: "🫓",
-    tone: "terracotta",
+    id: "tacos-birria", name: "Tacos Birria", nameEn: "Birria tacos",
+    description: "Tacos de birria con su consomé y opción de queso.",
+    descriptionEn: "Birria tacos with consommé and an optional cheese preparation.",
+    category: "Menú permanente", price: 17500, badge: "Especial de la casa", emoji: "🌮", tone: "hibiscus",
+    optionGroups: [{ id: "queso", name: "Elige la preparación", nameEn: "Choose the preparation", options: [
+      { id: "con-queso", name: "Con queso", nameEn: "With cheese" },
+      { id: "sin-queso", name: "Sin queso", nameEn: "Without cheese" },
+    ] }],
   },
   {
-    id: "avena",
-    name: "Avena con frutas",
-    nameEn: "Oatmeal with fruit",
-    description: "Avena cremosa, banano, fresa y canela",
-    descriptionEn: "Creamy oatmeal, banana, strawberry and cinnamon",
-    category: "Desayunos",
-    price: 8000,
-    badge: "Balanceado",
-    emoji: "🥣",
-    tone: "berry",
+    id: "gringas", name: "Gringas", nameEn: "Gringas",
+    description: "Tortilla de harina con queso y la carne que elijas.",
+    descriptionEn: "Flour tortilla with cheese and your choice of meat.",
+    category: "Menú permanente", price: 15000, emoji: "🌯", tone: "avocado",
+    optionGroups: meatOptions([["pollo", "Pollo", "Chicken"], ["pastor", "Pastor", "Al pastor"], ["res", "Res", "Beef"]]),
   },
   {
-    id: "sandwich-huevo",
-    name: "Sándwich de huevo",
-    nameEn: "Egg sandwich",
-    description: "Huevo, queso y aguacate en pan suave",
-    descriptionEn: "Egg, cheese and avocado on soft bread",
-    category: "Desayunos",
-    price: 9500,
-    emoji: "🥪",
-    tone: "avocado",
-  },
-  {
-    id: "pollo-plancha",
-    name: "Pollo a la plancha",
-    nameEn: "Grilled chicken",
-    description: "Pollo, puré de papa y vegetales",
-    descriptionEn: "Chicken, mashed potatoes and vegetables",
-    category: "Almuerzos",
-    price: 13500,
-    emoji: "🍗",
-    tone: "gold",
-  },
-  {
-    id: "pasta",
-    name: "Pasta pomodoro",
-    nameEn: "Pasta pomodoro",
-    description: "Pasta corta, salsa de tomate y queso aparte",
-    descriptionEn: "Short pasta, tomato sauce and cheese on the side",
-    category: "Almuerzos",
-    price: 12000,
-    badge: "Sin picante",
-    emoji: "🍝",
-    tone: "terracotta",
-  },
-  {
-    id: "brownie",
-    name: "Brownie de cacao",
-    nameEn: "Cocoa brownie",
-    description: "Porción escolar horneada, suave y chocolatosa",
-    descriptionEn: "A soft, chocolatey school-size portion",
-    category: "Postres",
-    price: 4500,
-    emoji: "🍫",
-    tone: "berry",
-  },
-  {
-    id: "galleta",
-    name: "Galleta de avena",
-    nameEn: "Oat cookie",
-    description: "Avena, canela y pasas",
-    descriptionEn: "Oats, cinnamon and raisins",
-    category: "Postres",
-    price: 3500,
-    emoji: "🍪",
-    tone: "gold",
-  },
-  {
-    id: "frutas",
-    name: "Vasito de frutas",
-    nameEn: "Fruit cup",
-    description: "Frutas frescas de temporada",
-    descriptionEn: "Fresh seasonal fruit",
-    category: "Postres",
-    price: 5000,
-    badge: "Fresco",
-    emoji: "🍓",
-    tone: "avocado",
-  },
-  {
-    id: "arroz-leche",
-    name: "Arroz con leche",
-    nameEn: "Rice pudding",
-    description: "Arroz cremoso con canela",
-    descriptionEn: "Creamy rice pudding with cinnamon",
-    category: "Postres",
-    price: 4500,
-    emoji: "🍚",
-    tone: "sunset",
-  },
-  {
-    id: "gelatina",
-    name: "Gelatina de colores",
-    nameEn: "Colorful gelatin",
-    description: "Gelatina frutal en porción individual",
-    descriptionEn: "Individual fruit gelatin",
-    category: "Postres",
-    price: 3000,
-    emoji: "🍮",
-    tone: "berry",
+    id: "tacos-flautas", name: "Tacos Flautas", nameEn: "Flauta tacos",
+    description: "Flautas doradas y crujientes con la carne que prefieras.",
+    descriptionEn: "Golden crispy flautas with your choice of meat.",
+    category: "Menú permanente", price: 14000, emoji: "🌯", tone: "gold",
+    optionGroups: meatOptions([["pollo", "Pollo", "Chicken"], ["pastor", "Pastor", "Al pastor"], ["res", "Res", "Beef"]]),
   },
   {
     id: "agua",
@@ -290,66 +214,6 @@ const dishes: Dish[] = [
     tone: "berry",
   },
   {
-    id: "taco-tuesday",
-    name: "Taco Tuesday",
-    nameEn: "Taco Tuesday",
-    description: "Combo de tacos, arroz y bebida del día",
-    descriptionEn: "Taco combo with rice and drink of the day",
-    category: "Especiales",
-    price: 14500,
-    badge: "Especial",
-    emoji: "🌮",
-    tone: "terracotta",
-  },
-  {
-    id: "pizza-friday",
-    name: "Viernes de pizza",
-    nameEn: "Pizza Friday",
-    description: "Pizza personal de queso con fruta",
-    descriptionEn: "Personal cheese pizza with fruit",
-    category: "Especiales",
-    price: 14000,
-    badge: "Viernes",
-    emoji: "🍕",
-    tone: "sunset",
-  },
-  {
-    id: "vegetariano",
-    name: "Bowl vegetariano",
-    nameEn: "Vegetarian bowl",
-    description: "Arroz, frijoles, vegetales y aguacate",
-    descriptionEn: "Rice, beans, vegetables and avocado",
-    category: "Especiales",
-    price: 12000,
-    badge: "Vegetariano",
-    emoji: "🥗",
-    tone: "avocado",
-  },
-  {
-    id: "cumpleanos",
-    name: "Combo de cumpleaños",
-    nameEn: "Birthday combo",
-    description: "Mini hamburguesa, papas horneadas y postre",
-    descriptionEn: "Mini burger, baked fries and dessert",
-    category: "Especiales",
-    price: 15500,
-    badge: "Celebración",
-    emoji: "🎉",
-    tone: "berry",
-  },
-  {
-    id: "chef",
-    name: "Especial del chef",
-    nameEn: "Chef special",
-    description: "Platillo rotativo preparado para la semana",
-    descriptionEn: "Rotating weekly chef special",
-    category: "Especiales",
-    price: 15000,
-    badge: "Semanal",
-    emoji: "👨‍🍳",
-    tone: "gold",
-  },
-  {
     id: "jamaica",
     name: "Agua de jamaica",
     nameEn: "Hibiscus water",
@@ -367,7 +231,7 @@ const initialKdsOrders: KdsOrder[] = [
     id: "L-1048",
     student: "Sofía M.",
     classroom: "3° B · Aula 12",
-    dish: "Quesadilla de pollo",
+    dish: "Chilaquiles · Salsa verde · Pollo",
     time: "11:30",
     stage: "Nuevas",
   },
@@ -375,7 +239,7 @@ const initialKdsOrders: KdsOrder[] = [
     id: "L-1049",
     student: "Daniela R.",
     classroom: "2° A · Aula 7",
-    dish: "Bowl mexicano",
+    dish: "Tacos · Cochinita pibil",
     time: "11:30",
     stage: "Nuevas",
     allergy: "Sin lácteos",
@@ -384,7 +248,7 @@ const initialKdsOrders: KdsOrder[] = [
     id: "L-1044",
     student: "Mateo M.",
     classroom: "Kinder A · Norte",
-    dish: "Taquitos suaves",
+    dish: "Gringas · Pollo",
     time: "11:30",
     stage: "Preparando",
   },
@@ -392,7 +256,7 @@ const initialKdsOrders: KdsOrder[] = [
     id: "L-1041",
     student: "Valentina P.",
     classroom: "4° C · Aula 18",
-    dish: "Quesadilla de pollo",
+    dish: "Tacos Birria · Con queso",
     time: "11:30",
     stage: "Listas",
   },
@@ -400,7 +264,7 @@ const initialKdsOrders: KdsOrder[] = [
     id: "L-1038",
     student: "Lucas A.",
     classroom: "1° B · Aula 4",
-    dish: "Bowl mexicano",
+    dish: "Nachos · Res",
     time: "11:30",
     stage: "Empacadas",
   },
@@ -530,7 +394,8 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const [category, setCategory] = useState<Category>("Todos");
   const [serviceType, setServiceType] = useState<ServiceType>("lunch");
   const [orderNotes, setOrderNotes] = useState("");
-  const [cart, setCart] = useState<Record<string, number>>({});
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [selectedDish, setSelectedDish] = useState<Dish | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -569,25 +434,30 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const currentStudent = students.find((student) => student.id === studentId) ?? students[0];
   const visibleDishes =
     category === "Todos" ? dishes : dishes.filter((dish) => dish.category === category);
-  const cartCount = Object.values(cart).reduce((total, quantity) => total + quantity, 0);
-  const cartTotal = Object.entries(cart).reduce((total, [id, quantity]) => {
-    const dish = dishes.find((item) => item.id === id);
-    return total + (dish?.price ?? 0) * quantity;
+  const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
+  const cartTotal = cart.reduce((total, item) => {
+    const dish = dishes.find((candidate) => candidate.id === item.dishId);
+    return total + (dish?.price ?? 0) * item.quantity;
   }, 0);
 
-  const addDish = (dish: Dish) => {
-    setCart((current) => ({ ...current, [dish.id]: (current[dish.id] ?? 0) + 1 }));
-    showToast(`${language === "es" ? "Agregado" : "Added"}: ${language === "es" ? dish.name : dish.nameEn}`);
+  const addConfiguredDish = (item: CartItem) => {
+    setCart((current) => {
+      const existing = current.find((candidate) => candidate.key === item.key);
+      return existing
+        ? current.map((candidate) => candidate.key === item.key
+          ? { ...candidate, quantity: candidate.quantity + item.quantity }
+          : candidate)
+        : [...current, item];
+    });
+    const dish = dishes.find((candidate) => candidate.id === item.dishId);
+    setSelectedDish(null);
+    showToast(`${language === "es" ? "Agregado" : "Added"}: ${language === "es" ? dish?.name : dish?.nameEn}`);
   };
 
-  const updateQuantity = (id: string, delta: number) => {
-    setCart((current) => {
-      const quantity = Math.max(0, (current[id] ?? 0) + delta);
-      const next = { ...current };
-      if (quantity === 0) delete next[id];
-      else next[id] = quantity;
-      return next;
-    });
+  const updateQuantity = (key: string, delta: number) => {
+    setCart((current) => current
+      .map((item) => item.key === key ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item)
+      .filter((item) => item.quantity > 0));
   };
 
   const confirmOrder = () => {
@@ -597,7 +467,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   };
 
   const startAnotherOrder = () => {
-    setCart({});
+    setCart([]);
     setConfirmed(false);
     setCategory("Todos");
     setOrderNotes("");
@@ -636,8 +506,8 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
         <a className="brand" href={surface === "family" ? "/" : surface === "admin" ? "/admin" : "/cocina"} aria-label="Ir al inicio">
           <Image src="/logo-solo-mexico.png" alt="Solo México" width={600} height={299} unoptimized />
           <span>
-            <strong>Lonchera</strong>
-            <small>Solo México</small>
+            <strong>Pipiro</strong>
+            <small>by Solo México</small>
           </span>
         </a>
 
@@ -676,11 +546,19 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           setCategory={setCategory}
           visibleDishes={visibleDishes}
           cart={cart}
-          addDish={addDish}
-          updateQuantity={updateQuantity}
+          openDish={setSelectedDish}
           cartCount={cartCount}
           cartTotal={cartTotal}
           openCart={() => setCartOpen(true)}
+        />
+      )}
+
+      {selectedDish && (
+        <ProductDialog
+          dish={selectedDish}
+          language={language}
+          close={() => setSelectedDish(null)}
+          add={addConfiguredDish}
         />
       )}
       {surface === "admin" && <AdminView showToast={showToast} todayLabel={todayLabel} />}
@@ -750,9 +628,8 @@ type FamilyViewProps = {
   category: Category;
   setCategory: (category: Category) => void;
   visibleDishes: Dish[];
-  cart: Record<string, number>;
-  addDish: (dish: Dish) => void;
-  updateQuantity: (id: string, delta: number) => void;
+  cart: CartItem[];
+  openDish: (dish: Dish) => void;
   cartCount: number;
   cartTotal: number;
   openCart: () => void;
@@ -775,8 +652,7 @@ function FamilyView({
   setCategory,
   visibleDishes,
   cart,
-  addDish,
-  updateQuantity,
+  openDish,
   cartCount,
   cartTotal,
   openCart,
@@ -904,7 +780,7 @@ function FamilyView({
         </div>
 
         <div className="category-row" aria-label="Categorías de comida">
-          {(["Todos", "Desayunos", "Almuerzos", "Postres", "Bebidas", "Especiales"] as Category[]).map((item) => (
+          {(["Todos", "Menú permanente", "Bebidas", "Especialidades"] as Category[]).map((item) => (
             <button
               key={item}
               className={category === item ? "active" : ""}
@@ -912,7 +788,7 @@ function FamilyView({
               aria-pressed={category === item}
             >
               {language === "en"
-                ? { Todos: "All", Desayunos: "Breakfast", Almuerzos: "Lunch", Postres: "Desserts", Bebidas: "Drinks", Especiales: "Specials" }[item]
+                ? { Todos: "All", "Menú permanente": "Always available", Bebidas: "Drinks", Especialidades: "Specials" }[item]
                 : item}
             </button>
           ))}
@@ -920,13 +796,16 @@ function FamilyView({
 
         <div className="dish-grid">
           {visibleDishes.map((dish) => {
-            const quantity = cart[dish.id] ?? 0;
+            const quantity = cart
+              .filter((item) => item.dishId === dish.id)
+              .reduce((total, item) => total + item.quantity, 0);
             return (
               <article className="dish-card" key={dish.id}>
+                <button className="dish-open" onClick={() => openDish(dish)} aria-label={`${language === "es" ? "Ver y personalizar" : "View and customize"} ${language === "es" ? dish.name : dish.nameEn}`}>
                 <div className={`dish-visual ${dish.tone}`}>
                   <span className="food-emoji" aria-hidden="true">{dish.emoji}</span>
                   {dish.badge && <span className="dish-badge">{dish.badge}</span>}
-                  <button className="favorite-button" aria-label={`Guardar ${dish.name}`}>♡</button>
+                  {quantity > 0 && <span className="dish-cart-count">{quantity}</span>}
                 </div>
                 <div className="dish-copy">
                   <div>
@@ -935,22 +814,20 @@ function FamilyView({
                   </div>
                   <div className="dish-footer">
                     <strong>{money.format(dish.price / 100)}</strong>
-                    {quantity ? (
-                      <div className="quantity-control" aria-label={`Cantidad de ${dish.name}`}>
-                        <button onClick={() => updateQuantity(dish.id, -1)} aria-label="Reducir cantidad">−</button>
-                        <span>{quantity}</span>
-                        <button onClick={() => updateQuantity(dish.id, 1)} aria-label="Aumentar cantidad">+</button>
-                      </div>
-                    ) : (
-                      <button className="add-button" onClick={() => addDish(dish)}>
-                        + {t.add}
-                      </button>
-                    )}
+                    <span className="add-button">{dish.optionGroups?.length ? (language === "es" ? "Elegir" : "Choose") : `+ ${t.add}`}</span>
                   </div>
                 </div>
+                </button>
               </article>
             );
           })}
+          {visibleDishes.length === 0 && (
+            <div className="empty-menu">
+              <span aria-hidden="true">👨‍🍳</span>
+              <h3>{language === "es" ? "Próximamente habrá especialidades" : "Specials are coming soon"}</h3>
+              <p>{language === "es" ? "Los platillos de temporada se publicarán desde Administración." : "Seasonal dishes will be published from Administration."}</p>
+            </div>
+          )}
         </div>
       </section>
 
@@ -978,7 +855,7 @@ function AdminView({ showToast, todayLabel }: { showToast: (message: string) => 
 
   const runImport = () => {
     setImported(true);
-    showToast("Archivo validado: 12 platillos listos para revisar");
+    showToast("Archivo validado: 8 platillos listos para revisar");
   };
 
   return (
@@ -1011,7 +888,7 @@ function AdminView({ showToast, todayLabel }: { showToast: (message: string) => 
           <div className={`drop-zone ${imported ? "has-file" : ""}`}>
             <span className="upload-orbit" aria-hidden="true">{imported ? "✓" : "⇧"}</span>
             <h3>{imported ? "menú-agosto.xlsx validado" : "Arrastra tu archivo aquí"}</h3>
-            <p>{imported ? "12 nuevos · 4 cambios · 0 errores" : "CSV o XLSX de hasta 10 MB"}</p>
+            <p>{imported ? "8 nuevos · 4 cambios · 0 errores" : "CSV o XLSX de hasta 10 MB"}</p>
             <input
               ref={fileInput}
               type="file"
@@ -1037,9 +914,9 @@ function AdminView({ showToast, todayLabel }: { showToast: (message: string) => 
             <button className="text-button">Editar</button>
           </div>
           <div className="menu-summary-list">
-            <MenuSummary emoji="🌮" name="Quesadilla de pollo" orders={18} capacity={24} />
-            <MenuSummary emoji="🥑" name="Bowl mexicano" orders={14} capacity={20} />
-            <MenuSummary emoji="🌯" name="Taquitos suaves" orders={10} capacity={16} />
+            <MenuSummary emoji="🍳" name="Chilaquiles" orders={18} capacity={24} />
+            <MenuSummary emoji="🌮" name="Tacos" orders={14} capacity={20} />
+            <MenuSummary emoji="🧀" name="Nachos" orders={10} capacity={16} />
             <MenuSummary emoji="🥞" name="Mini pancakes" orders={6} capacity={12} />
           </div>
         </section>
@@ -1145,6 +1022,100 @@ function KitchenView({ orders, advanceOrder, showToast }: { orders: KdsOrder[]; 
   );
 }
 
+function ProductDialog({
+  dish,
+  language,
+  close,
+  add,
+}: {
+  dish: Dish;
+  language: Language;
+  close: () => void;
+  add: (item: CartItem) => void;
+}) {
+  const [selections, setSelections] = useState<Record<string, string>>({});
+  const [quantity, setQuantity] = useState(1);
+  const [notes, setNotes] = useState("");
+  const groups = dish.optionGroups ?? [];
+  const complete = groups.every((group) => Boolean(selections[group.id]));
+
+  const submit = () => {
+    if (!complete) return;
+    const selectionKey = groups.map((group) => `${group.id}:${selections[group.id]}`).join("|");
+    const normalizedNotes = notes.trim();
+    add({
+      key: `${dish.id}|${selectionKey}|${normalizedNotes.toLocaleLowerCase("es-HN")}`,
+      dishId: dish.id,
+      quantity,
+      selections,
+      notes: normalizedNotes,
+    });
+  };
+
+  return (
+    <div className="modal-backdrop product-backdrop" role="presentation" onMouseDown={close}>
+      <section className="product-sheet" role="dialog" aria-modal="true" aria-labelledby="product-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className={`product-hero ${dish.tone}`}>
+          <span className="product-emoji" aria-hidden="true">{dish.emoji}</span>
+          <button className="close-button product-close" onClick={close} aria-label={language === "es" ? "Cerrar producto" : "Close product"}>×</button>
+        </div>
+        <div className="product-content">
+          <p className="product-kicker">{language === "es" ? dish.category : dish.category === "Bebidas" ? "Drinks" : "Always available"}</p>
+          <h2 id="product-title">{language === "es" ? dish.name : dish.nameEn}</h2>
+          <p className="product-description">{language === "es" ? dish.description : dish.descriptionEn}</p>
+          <strong className="product-price">{money.format(dish.price / 100)}</strong>
+
+          {groups.map((group) => (
+            <fieldset className="option-group" key={group.id}>
+              <legend>
+                <span>{language === "es" ? group.name : group.nameEn}</span>
+                <em>{language === "es" ? "Obligatorio" : "Required"}</em>
+              </legend>
+              <small>{language === "es" ? "Selecciona 1 opción" : "Select 1 option"}</small>
+              <div className="option-list">
+                {group.options.map((option) => (
+                  <label key={option.id} className={selections[group.id] === option.id ? "selected" : ""}>
+                    <span>{language === "es" ? option.name : option.nameEn}</span>
+                    <input
+                      type="radio"
+                      name={`${dish.id}-${group.id}`}
+                      value={option.id}
+                      checked={selections[group.id] === option.id}
+                      onChange={() => setSelections((current) => ({ ...current, [group.id]: option.id }))}
+                    />
+                    <i aria-hidden="true" />
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ))}
+
+          {!groups.length && (
+            <div className="standard-preparation"><span>✓</span><div><strong>{language === "es" ? "Preparación tradicional" : "Traditional preparation"}</strong><small>{language === "es" ? "Este producto no necesita opciones adicionales." : "This item does not require additional choices."}</small></div></div>
+          )}
+
+          <label className="product-notes">
+            <span>{language === "es" ? "¿Alguna instrucción para este producto?" : "Any instructions for this item?"}</span>
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={180} placeholder={language === "es" ? "Ej.: salsa aparte" : "E.g. salsa on the side"} />
+            <small>{notes.length}/180 · {language === "es" ? "Las alergias se toman del perfil" : "Allergies come from the profile"}</small>
+          </label>
+        </div>
+        <footer className="product-footer">
+          <div className="product-quantity" aria-label={language === "es" ? "Cantidad" : "Quantity"}>
+            <button onClick={() => setQuantity((current) => Math.max(1, current - 1))} aria-label={language === "es" ? "Reducir cantidad" : "Decrease quantity"}>−</button>
+            <strong>{quantity}</strong>
+            <button onClick={() => setQuantity((current) => current + 1)} aria-label={language === "es" ? "Aumentar cantidad" : "Increase quantity"}>+</button>
+          </div>
+          <button className="product-add" onClick={submit} disabled={!complete}>
+            <span>{complete ? (language === "es" ? "Agregar a mi pedido" : "Add to my order") : (language === "es" ? "Completa las opciones" : "Complete the options")}</span>
+            <strong>{money.format((dish.price * quantity) / 100)}</strong>
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function CartDialog({
   t,
   language,
@@ -1161,7 +1132,7 @@ function CartDialog({
 }: {
   t: (typeof ui)[Language];
   language: Language;
-  cart: Record<string, number>;
+  cart: CartItem[];
   total: number;
   student: Student;
   selectedDateLabel: string;
@@ -1186,14 +1157,23 @@ function CartDialog({
           {student.allergies.length > 0 && <span>{student.allergies.join(", ")}</span>}
         </div>
         <div className="cart-items">
-          {Object.entries(cart).map(([id, quantity]) => {
-            const dish = dishes.find((item) => item.id === id);
+          {cart.map((item) => {
+            const dish = dishes.find((candidate) => candidate.id === item.dishId);
             if (!dish) return null;
+            const optionLabels = (dish.optionGroups ?? []).map((group) => {
+              const selected = group.options.find((option) => option.id === item.selections[group.id]);
+              return selected ? (language === "es" ? selected.name : selected.nameEn) : null;
+            }).filter(Boolean);
             return (
-              <div className="cart-item" key={id}>
+              <div className="cart-item" key={item.key}>
                 <span className={`mini-food ${dish.tone}`}>{dish.emoji}</span>
-                <div><strong>{language === "es" ? dish.name : dish.nameEn}</strong><small>{money.format(dish.price / 100)}</small></div>
-                <div className="quantity-control"><button onClick={() => updateQuantity(id, -1)}>−</button><span>{quantity}</span><button onClick={() => updateQuantity(id, 1)}>+</button></div>
+                <div>
+                  <strong>{language === "es" ? dish.name : dish.nameEn}</strong>
+                  {optionLabels.length > 0 && <small>{optionLabels.join(" · ")}</small>}
+                  {item.notes && <small className="cart-item-notes">“{item.notes}”</small>}
+                  <small>{money.format(dish.price / 100)}</small>
+                </div>
+                <div className="quantity-control"><button onClick={() => updateQuantity(item.key, -1)}>−</button><span>{item.quantity}</span><button onClick={() => updateQuantity(item.key, 1)}>+</button></div>
               </div>
             );
           })}

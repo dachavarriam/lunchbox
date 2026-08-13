@@ -1,7 +1,7 @@
 {
-  "name": "Lonchera Solo México",
-  "short_name": "Lonchera",
-  "description": "Pedidos escolares de Solo México",
+  "name": "Pipiro by Solo México",
+  "short_name": "Pipiro",
+  "description": "Pedidos escolares de comida mexicana preparados a tu gusto",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#f6f8fc",

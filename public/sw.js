@@ -1,4 +1,4 @@
-const CACHE_NAME = "lonchera-prototype-v1";
+const CACHE_NAME = "pipiro-prototype-v2";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/logo-solo-mexico.png", "/icon-600.png"];
 
 self.addEventListener("install", (event) => {

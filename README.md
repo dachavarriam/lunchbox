@@ -1,4 +1,4 @@
-# Lonchera Solo México
+# Pipiro by Solo México
 
 PWA para validar pedidos escolares de Solo México en la Escuela Internacional Sampedrana (EIS). La primera etapa opera sin pagos.
 

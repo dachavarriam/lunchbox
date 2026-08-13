@@ -9,30 +9,30 @@ export async function generateMetadata(): Promise<Metadata> {
   const origin = `${protocol}://${host}`;
 
   return {
-    title: "Lonchera Solo México",
-    description: "Comidas escolares preparadas con cariño y entregadas a tiempo.",
-    applicationName: "Lonchera Solo México",
+    title: "Pipiro by Solo México",
+    description: "Comida mexicana para la escuela, preparada a tu gusto y entregada a tiempo.",
+    applicationName: "Pipiro by Solo México",
     manifest: "/manifest.webmanifest",
     appleWebApp: {
       capable: true,
       statusBarStyle: "default",
-      title: "Lonchera",
+      title: "Pipiro",
     },
     icons: {
       icon: "/icon-600.png",
       apple: "/icon-600.png",
     },
     openGraph: {
-      title: "Lonchera Solo México",
-      description: "Almuerzos escolares, listos a tiempo.",
+      title: "Pipiro by Solo México",
+      description: "Comida mexicana para la escuela, preparada a tu gusto.",
       images: [{ url: `${origin}/og.png`, width: 1731, height: 909 }],
       locale: "es_HN",
       type: "website",
     },
     twitter: {
       card: "summary_large_image",
-      title: "Lonchera Solo México",
-      description: "Almuerzos escolares, listos a tiempo.",
+      title: "Pipiro by Solo México",
+      description: "Comida mexicana para la escuela, preparada a tu gusto.",
       images: [`${origin}/og.png`],
     },
   };
