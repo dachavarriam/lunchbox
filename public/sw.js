@@ -1,5 +1,5 @@
-const CACHE_NAME = "pipiro-prototype-v2";
-const APP_SHELL = ["/", "/manifest.webmanifest", "/logo-solo-mexico.png", "/icon-600.png"];
+const CACHE_NAME = "pipiro-prototype-v5";
+const APP_SHELL = ["/", "/manifest.webmanifest", "/pipiro-logo.png", "/pipiro-fondo.png", "/icon-600.png"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));

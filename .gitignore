@@ -10,5 +10,7 @@ dist/
 .vinext/
 .env*
 !.env.example
+backups/
+outputs/
 .DS_Store
 *.tsbuildinfo

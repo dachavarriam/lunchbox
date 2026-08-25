@@ -4,8 +4,8 @@
   "description": "Pedidos escolares de comida mexicana preparados a tu gusto",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f6f8fc",
-  "theme_color": "#173b76",
+  "background_color": "#fffaf7",
+  "theme_color": "#658BD0",
   "lang": "es-HN",
   "orientation": "portrait-primary",
   "icons": [

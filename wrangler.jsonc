@@ -4,6 +4,12 @@
   "main": "./worker/index.ts",
   "compatibility_date": "2026-08-08",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    { "pattern": "pipiro.solomexicohn.com", "custom_domain": true },
+    { "pattern": "admin-pipiro.solomexicohn.com", "custom_domain": true },
+    { "pattern": "kds-pipiro.solomexicohn.com", "custom_domain": true }
+  ],
   "assets": {
     "directory": "./dist/client",
     "binding": "ASSETS"
@@ -23,13 +29,27 @@
     {
       "binding": "MEDIA",
       "bucket_name": "solomexico"
+    },
+    {
+      "binding": "PAYMENT_RECEIPTS",
+      "bucket_name": "pipiro"
     }
   ],
   "vars": {
     "PUBLIC_MEDIA_BASE_URL": "https://media.solomexicohn.com",
     "DEFAULT_SCHOOL_SLUG": "eis",
     "DEFAULT_LOCALE": "es-HN",
-    "DEFAULT_CURRENCY": "HNL"
+    "DEFAULT_CURRENCY": "HNL",
+    "BANK_NAME": "BAC Credomatic",
+    "BANK_ACCOUNT_HOLDER": "CHM SA",
+    "BANK_ACCOUNT_NUMBER": "Pendiente de configurar",
+    "BANK_ACCOUNT_TYPE": "Cuenta por configurar",
+    "DEMO_MODE": "true",
+    "DEMO_ACTOR_USER_ID": "user_demo_family",
+    "APP_ORIGIN": "https://pipiro.solomexicohn.com",
+    "ADMIN_ORIGIN": "https://admin-pipiro.solomexicohn.com",
+    "KDS_ORIGIN": "https://kds-pipiro.solomexicohn.com",
+    "GOOGLE_CLIENT_ID": "269563097261-igerbhrdb7prc3a5vnvsqd2k0bi4jlut.apps.googleusercontent.com"
   },
   "observability": {
     "enabled": true,
@@ -37,5 +57,8 @@
       "enabled": true,
       "head_sampling_rate": 1
     }
+  },
+  "secrets": {
+    "required": ["GOOGLE_CLIENT_SECRET"]
   }
 }

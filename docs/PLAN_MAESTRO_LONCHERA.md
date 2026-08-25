@@ -1,5 +1,7 @@
 # Plan maestro — Lonchera Solo México
 
+> **Documento histórico.** La marca, el alcance y varias decisiones técnicas cambiaron. Consulte la [Guía funcional y técnica vigente de Pipiro](GUIA_FUNCIONAL_PIPIRO.md).
+
 **Estado:** propuesta para revisión  
 **Fecha:** 9 de agosto de 2026  
 **Mercado inicial:** Honduras  
