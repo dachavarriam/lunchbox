@@ -1116,6 +1116,12 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
     }
   };
 
+  const logout = async () => {
+    const response = await fetch("/api/auth/logout", { method: "POST" });
+    if (!response.ok) { showToast("No se pudo cerrar la sesión"); return; }
+    window.location.assign("/login");
+  };
+
   const activatePush = async () => {
     try {
       const permission = await Notification.requestPermission();
@@ -1126,7 +1132,8 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
       const registration = await navigator.serviceWorker.ready;
       const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(config.publicKey) });
       const saved = await fetch("/api/demo/notifications/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription.toJSON()) });
-      if (!saved.ok) throw new Error("No se pudo registrar este dispositivo");
+      const savedPayload = await saved.json() as { error?: string };
+      if (!saved.ok) throw new Error(savedPayload.error ?? "No se pudo registrar este dispositivo");
       setPushState("active"); showToast("Notificaciones activadas en este dispositivo");
     } catch (error) { showToast(error instanceof Error ? error.message : "No se pudieron activar las notificaciones"); }
   };
@@ -1163,6 +1170,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
             <span aria-hidden="true">↓</span> {t.install}
           </button>
           {surface === "family" && !authenticatedUser && <a className="login-button" href="/login">Ingresar</a>}
+          {surface === "family" && authenticatedUser && <button className="logout-button" onClick={() => void logout()}>Salir</button>}
           {surface !== "family" && <button className="avatar-button" aria-label={authenticatedUser ? `Cuenta de ${authenticatedUser.display_name}` : "Cuenta del personal"}>
             {authenticatedUser ? authenticatedUser.display_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("es-HN") : "DC"}
           </button>}
@@ -1206,6 +1214,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           pushState={pushState}
           activatePush={activatePush}
           testPush={testPush}
+          guardianName={authenticatedUser?.display_name ?? ""}
         />
       )}
 
@@ -1358,6 +1367,7 @@ type FamilyViewProps = {
   pushState: PushState;
   activatePush: () => Promise<void>;
   testPush: () => Promise<void>;
+  guardianName: string;
 };
 
 function FamilyView({
@@ -1387,13 +1397,14 @@ function FamilyView({
   pushState,
   activatePush,
   testPush,
+  guardianName,
 }: FamilyViewProps) {
   return (
     <div className="family-page page-content">
       <section className="intro-row">
         <div>
           <p className="eyebrow">{todayLabel}</p>
-          <h1>{t.greeting}</h1>
+          <h1>{guardianName ? `${language === "es" ? "¡Hola" : "Hi"}, ${guardianName.trim().split(/\s+/)[0]}!` : (language === "es" ? "¡Hola!" : "Hi!")}</h1>
           <p>{t.subtitle}</p>
         </div>
         <div className="help-card">

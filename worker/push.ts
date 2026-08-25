@@ -41,7 +41,8 @@ export function validPushSubscription(value: unknown): value is {
   const candidate = value as Record<string, unknown>;
   const keys = candidate.keys;
   return typeof candidate.endpoint === "string" && candidate.endpoint.length <= 2048 && allowedPushEndpoint(candidate.endpoint) &&
-    (candidate.expirationTime === null || (typeof candidate.expirationTime === "number" && Number.isFinite(candidate.expirationTime))) &&
+    (candidate.expirationTime === undefined || candidate.expirationTime === null ||
+      (typeof candidate.expirationTime === "number" && Number.isFinite(candidate.expirationTime))) &&
     Boolean(keys && typeof keys === "object" && !Array.isArray(keys) &&
       typeof (keys as Record<string, unknown>).p256dh === "string" && String((keys as Record<string, unknown>).p256dh).length <= 256 &&
       typeof (keys as Record<string, unknown>).auth === "string" && String((keys as Record<string, unknown>).auth).length <= 128);

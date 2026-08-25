@@ -357,7 +357,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
        VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_id, endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
        expiration_time = excluded.expiration_time, user_agent = excluded.user_agent, is_active = 1, updated_at = CURRENT_TIMESTAMP`,
-    ).bind(id, actorUserId, body.endpoint, body.keys.p256dh, body.keys.auth, body.expirationTime,
+    ).bind(id, actorUserId, body.endpoint, body.keys.p256dh, body.keys.auth, body.expirationTime ?? null,
       (request.headers.get("user-agent") ?? "").slice(0, 300) || null).run();
     return json({ ok: true }, { status: 201 });
   }
