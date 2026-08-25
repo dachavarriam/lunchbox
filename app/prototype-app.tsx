@@ -183,7 +183,7 @@ function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
-type IconName = "meal" | "bank" | "card" | "clock" | "alert" | "check" | "calendar" | "bag" | "help" | "user" | "home" | "orders";
+type IconName = "meal" | "bank" | "card" | "clock" | "alert" | "check" | "calendar" | "bag" | "help" | "user" | "home" | "orders" | "logout";
 
 function PipiroIcon({ name, size = 22 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -199,6 +199,7 @@ function PipiroIcon({ name, size = 22 }: { name: IconName; size?: number }) {
     user: <><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0" /></>,
     home: <><path d="m3 11 9-8 9 8"/><path d="M5 10v11h14V10M9 21v-6h6v6" /></>,
     orders: <><path d="M6 3h12v18H6zM9 8h6M9 12h6M9 16h4" /></>,
+    logout: <><path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10" /></>,
   };
   return <svg className="pipiro-icon" aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
 }
@@ -726,7 +727,13 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
     ]).then(async ([subscription, response]) => {
       if (!response.ok) { setPushState("unconfigured"); return; }
       const config = await response.json() as { enabled?: boolean };
-      setPushState(!config.enabled ? "unconfigured" : subscription ? "active" : Notification.permission === "denied" ? "denied" : "available");
+      if (!config.enabled) { setPushState("unconfigured"); return; }
+      if (subscription) {
+        const saved = await fetch("/api/demo/notifications/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription.toJSON()) });
+        setPushState(saved.ok ? "active" : "available");
+        return;
+      }
+      setPushState(Notification.permission === "denied" ? "denied" : "available");
     }).catch(() => setPushState("unconfigured")), 0);
     return () => window.clearTimeout(timer);
   }, [surface]);
@@ -1138,11 +1145,6 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
     } catch (error) { showToast(error instanceof Error ? error.message : "No se pudieron activar las notificaciones"); }
   };
 
-  const testPush = async () => {
-    const response = await fetch("/api/demo/notifications/test", { method: "POST" });
-    const payload = await response.json() as { message?: string; error?: string };
-    showToast(response.ok ? (payload.message ?? "Notificación de prueba programada") : (payload.error ?? "No se pudo enviar la prueba"));
-  };
 
   return (
     <main className={`app-shell ${surface === "family" ? "family-shell" : ""}`}>
@@ -1170,7 +1172,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
             <span aria-hidden="true">↓</span> {t.install}
           </button>
           {surface === "family" && !authenticatedUser && <a className="login-button" href="/login">Ingresar</a>}
-          {surface === "family" && authenticatedUser && <button className="logout-button" onClick={() => void logout()}>Salir</button>}
+          {surface === "family" && authenticatedUser && <button className="logout-button" onClick={() => void logout()}><PipiroIcon name="logout" size={16} />Salir</button>}
           {surface !== "family" && <button className="avatar-button" aria-label={authenticatedUser ? `Cuenta de ${authenticatedUser.display_name}` : "Cuenta del personal"}>
             {authenticatedUser ? authenticatedUser.display_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("es-HN") : "DC"}
           </button>}
@@ -1213,7 +1215,6 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           availability={availability}
           pushState={pushState}
           activatePush={activatePush}
-          testPush={testPush}
           guardianName={authenticatedUser?.display_name ?? ""}
         />
       )}
@@ -1366,7 +1367,6 @@ type FamilyViewProps = {
   availability: Availability | null;
   pushState: PushState;
   activatePush: () => Promise<void>;
-  testPush: () => Promise<void>;
   guardianName: string;
 };
 
@@ -1396,7 +1396,6 @@ function FamilyView({
   availability,
   pushState,
   activatePush,
-  testPush,
   guardianName,
 }: FamilyViewProps) {
   return (
@@ -1482,10 +1481,10 @@ function FamilyView({
         </div>
       </section>
 
-      {(pushState === "available" || pushState === "active" || pushState === "denied") && <section className={`push-opt-in ${pushState === "active" ? "is-active" : ""}`}>
-        <span aria-hidden="true"><PipiroIcon name={pushState === "active" ? "check" : "alert"} /></span>
-        <div><strong>{pushState === "active" ? "Notificaciones activadas" : "Recibe avisos de tus pedidos"}</strong><p>{pushState === "active" ? "Este dispositivo recibirá confirmaciones de pago y entrega." : pushState === "denied" ? "Las notificaciones están bloqueadas en la configuración del dispositivo." : "Te avisaremos cuando aprobemos el pago y cuando el almuerzo sea entregado."}</p></div>
-        {pushState === "active" ? <button onClick={() => void testPush()}>Enviar prueba</button> : pushState === "available" ? <button onClick={() => void activatePush()}>Activar</button> : null}
+      {(pushState === "available" || pushState === "denied") && <section className="push-opt-in">
+        <span aria-hidden="true"><PipiroIcon name="alert" /></span>
+        <div><strong>Recibe avisos de tus pedidos</strong><p>{pushState === "denied" ? "Las notificaciones están bloqueadas en la configuración del dispositivo." : "Te avisaremos cuando aprobemos el pago y cuando el almuerzo sea entregado."}</p></div>
+        {pushState === "available" ? <button onClick={() => void activatePush()}>Activar</button> : null}
       </section>}
 
       <section aria-labelledby="date-title">

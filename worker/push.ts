@@ -19,7 +19,6 @@ const pushCopy: Record<string, { title: string; body: string }> = {
   payment_approved: { title: "Pago confirmado", body: "Tu pago fue aprobado y el pedido pasó a cocina." },
   order_delivered: { title: "Almuerzo entregado", body: "La institución confirmó la entrega del almuerzo." },
   support_request_created: { title: "Nueva solicitud de ayuda", body: "Hay un nuevo mensaje de un cliente en Administración." },
-  push_test: { title: "Notificaciones activadas", body: "Pipiro podrá avisarte sobre pagos, pedidos y entregas." },
 };
 
 function allowedPushEndpoint(value: string): boolean {
@@ -58,8 +57,9 @@ export async function processPushOutbox(env: Env): Promise<void> {
   ).all<PushOutboxRow>();
 
   for (const message of outbox.results) {
-    await env.DB.prepare("UPDATE notification_outbox SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'queued'")
+    const claimed = await env.DB.prepare("UPDATE notification_outbox SET status = 'sending', attempts = attempts + 1 WHERE id = ? AND status = 'queued'")
       .bind(message.id).run();
+    if (!claimed.meta.changes) continue;
     const subscriptions = await env.DB.prepare(
       "SELECT id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ? AND is_active = 1",
     ).bind(message.user_id).all<PushSubscriptionRow>();
@@ -82,9 +82,15 @@ export async function processPushOutbox(env: Env): Promise<void> {
         ).bind(statusCode, subscription.id).run();
       }
     }
-    await env.DB.prepare(
-      `UPDATE notification_outbox SET status = ?, sent_at = CASE WHEN ? > 0 THEN CURRENT_TIMESTAMP ELSE sent_at END,
-       last_error = ? WHERE id = ?`,
-    ).bind(delivered ? "sent" : "failed", delivered, delivered ? null : lastError, message.id).run();
+    if (delivered) {
+      await env.DB.prepare("UPDATE notification_outbox SET status = 'sent', sent_at = CURRENT_TIMESTAMP, last_error = NULL WHERE id = ?")
+        .bind(message.id).run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE notification_outbox SET status = CASE WHEN attempts < 3 AND ? > 0 THEN 'queued' ELSE 'failed' END,
+         available_at = CASE WHEN attempts < 3 AND ? > 0 THEN datetime('now', '+1 minute') ELSE available_at END,
+         last_error = ? WHERE id = ?`,
+      ).bind(subscriptions.results.length, subscriptions.results.length, lastError, message.id).run();
+    }
   }
 }

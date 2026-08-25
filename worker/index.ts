@@ -370,13 +370,6 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
     return json({ ok: true });
   }
 
-  if (request.method === "POST" && url.pathname === "/api/demo/notifications/test") {
-    await env.DB.prepare(
-      "INSERT INTO notification_outbox (id, user_id, channel, template_key) VALUES (?, ?, 'push', 'push_test')",
-    ).bind(crypto.randomUUID(), actorUserId).run();
-    return json({ ok: true, message: "La notificación de prueba se enviará en menos de un minuto" }, { status: 202 });
-  }
-
   if (request.method === "POST" && url.pathname === "/api/demo/payment-batches") {
     const body = await readBoundedJson(request);
     if (!isRecord(body) || !Array.isArray(body.orderIds) || body.orderIds.length < 1 || body.orderIds.length > 10 ||
@@ -1124,12 +1117,20 @@ const worker = {
         const access = await authorizeSurface(request, env, url, ["admin", "kitchen"]);
         if (access) return access;
       }
+      const dispatchPushImmediately = request.method !== "GET" &&
+        (url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/admin\/payment-batches\/[^/]+$/.test(url.pathname));
       const cmsResponse = await handleCmsApi(request, env, url);
-      if (cmsResponse) return cmsResponse;
+      if (cmsResponse) {
+        if (dispatchPushImmediately && cmsResponse.ok) ctx.waitUntil(processPushOutbox(env));
+        return cmsResponse;
+      }
       const mediaResponse = await handlePublicMedia(request, env, url);
       if (mediaResponse) return mediaResponse;
       const demoResponse = await handleDemoApi(request, env, url);
-      if (demoResponse) return demoResponse;
+      if (demoResponse) {
+        if (dispatchPushImmediately && demoResponse.ok) ctx.waitUntil(processPushOutbox(env));
+        return demoResponse;
+      }
       const apiResponse = await handlePublicApi(request, env, url);
       if (apiResponse) return apiResponse;
     } catch (error) {
