@@ -348,6 +348,11 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
 
     await env.DB.prepare("UPDATE app_users SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'invited'")
       .bind(userId).run();
+    if (requestSurface(url, env) === "family") {
+      await env.DB.prepare(
+        "INSERT OR IGNORE INTO user_roles (user_id, role, school_id) VALUES (?, 'customer', 'school_eis')",
+      ).bind(userId).run();
+    }
     await env.DB.prepare(
       `UPDATE staff_invitations SET status = 'accepted', accepted_by_user_id = ?, accepted_at = CURRENT_TIMESTAMP
        WHERE email = ? COLLATE NOCASE AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,

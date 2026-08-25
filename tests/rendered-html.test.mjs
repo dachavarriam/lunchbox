@@ -99,7 +99,7 @@ test("isolates production surfaces by hostname before rendering", async () => {
 });
 
 test("ships the local PWA assets, functional migrations and pnpm policy", async () => {
-  const [manifestText, serviceWorker, packageText, workspaceText, wranglerText, functionalMigration, cmsMigration, paymentMigration, authMigration, operationsMigration, authSource, prototypeSource, workerSource, clientAssets] = await Promise.all([
+  const [manifestText, serviceWorker, packageText, workspaceText, wranglerText, functionalMigration, cmsMigration, paymentMigration, authMigration, operationsMigration, customerAccessMigration, authSource, prototypeSource, workerSource, clientAssets] = await Promise.all([
     readFile(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -110,6 +110,7 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
     readFile(new URL("../migrations/0007_transfer_receipts_and_lunch_rules.sql", import.meta.url), "utf8"),
     readFile(new URL("../migrations/0010_google_auth_sessions.sql", import.meta.url), "utf8"),
     readFile(new URL("../migrations/0011_staff_kds_and_printing.sql", import.meta.url), "utf8"),
+    readFile(new URL("../migrations/0014_admin_customer_access.sql", import.meta.url), "utf8"),
     readFile(new URL("../worker/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/prototype-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
@@ -146,11 +147,13 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.match(operationsMigration, /prep_time_minutes/);
   assert.match(operationsMigration, /CREATE TABLE staff_invitations/);
   assert.match(operationsMigration, /CREATE TABLE print_jobs/);
+  assert.match(customerAccessMigration, /'customer', 'school_eis'/);
   assert.match(authSource, /code_challenge_method: "S256"/);
   assert.match(authSource, /HttpOnly; SameSite=Lax/);
   assert.match(authSource, /crypto\.subtle\.verify/);
   assert.match(authSource, /authorizeRequest/);
   assert.match(authSource, /No tienes permiso para esta sección/);
+  assert.match(authSource, /requestSurface\(url, env\) === "family"/);
   assert.deepEqual(wranglerConfig.secrets.required, ["GOOGLE_CLIENT_SECRET"]);
   assert.equal(Object.hasOwn(wranglerConfig.vars, "GOOGLE_CLIENT_SECRET"), false);
   assert.equal(wranglerConfig.r2_buckets.some((bucket) => bucket.binding === "PAYMENT_RECEIPTS" && bucket.bucket_name === "pipiro"), true);
