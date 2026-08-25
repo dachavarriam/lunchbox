@@ -113,6 +113,9 @@ type DemoOrder = {
   payment_batch_id: string | null;
   checkout_number: string | null;
   payment_expires_at: string | null;
+  bank_account_id: string | null;
+  bank_label: string | null;
+  bank_name: string | null;
   created_at: string;
   prep_time_minutes: number;
   stage_started_at: string;
@@ -153,6 +156,7 @@ type Availability = {
 
 type PaymentIssue = { id: string; checkout_number: string; expected_cents: number; received_cents: number; difference_cents: number; status: string };
 type AppNotification = { id: string; order_id: string | null; template_key: string; status: string; created_at: string };
+type SupportRequest = { id: string; order_id: string | null; category: string; subject: string; message: string; status: string; admin_note: string | null; created_at: string; updated_at: string };
 type AuthenticatedUser = { id: string; email: string; display_name: string; locale: string };
 type AdminSection = "overview" | "analytics" | "payments" | "menu" | "customers" | "support" | "settings";
 type AdminCustomer = { id: string; display_name: string; email: string; status: string; credit_balance_cents: number };
@@ -166,6 +170,7 @@ type AdminAnalytics = {
   topGrades: Array<{ label: string | null; orders: number; revenue_cents: number }>;
   weekdays: Array<{ label: string; orders: number; revenue_cents: number; weekday_number: number }>;
   daily: Array<{ date: string; sales_cents: number; approved_payments: number }>;
+  byBank: Array<{ id: string; label: string; bank_name: string; payment_count: number; amount_cents: number }>;
 };
 
 interface InstallPromptEvent extends Event {
@@ -692,6 +697,8 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const [applyCredit, setApplyCredit] = useState(false);
   const [authenticatedUser, setAuthenticatedUser] = useState<AuthenticatedUser | null>(null);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [pushState, setPushState] = useState<PushState>("loading");
   const [familyDataState, setFamilyDataState] = useState<FamilyDataState>(surface === "family" ? "loading" : "demo");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -804,6 +811,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
         creditBalanceCents?: number;
         paymentIssues?: PaymentIssue[];
         notifications?: AppNotification[];
+        supportRequests?: SupportRequest[];
         students?: Array<{
           id: string; first_name: string; last_name: string; delivery_notes: string | null;
           grade: string; section: string; classroom_name: string | null; building: string | null;
@@ -816,6 +824,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
       if (typeof payload.creditBalanceCents === "number") setCreditBalanceCents(payload.creditBalanceCents);
       if (payload.paymentIssues) setPaymentIssues(payload.paymentIssues);
       if (payload.notifications) setNotifications(payload.notifications);
+      if (payload.supportRequests) setSupportRequests(payload.supportRequests);
       if (surface === "family") {
         const colors = ["#4b70b5", "#4c8f94", "#b63d3a", "#9a5f7d"];
         const mapped = (payload.students ?? []).map((student, index): Student => ({
@@ -1116,7 +1125,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
 
   const reviewNotifications = async () => {
     const unread = notifications.filter((item) => item.status !== "read");
-    showToast(unread.length ? `${unread.length} actualización${unread.length === 1 ? "" : "es"} de pedidos y pagos` : "No tienes notificaciones nuevas");
+    setNotificationsOpen(true);
     if (unread.length) {
       await fetch("/api/demo/notifications/read-all", { method: "POST" });
       setNotifications((current) => current.map((item) => ({ ...item, status: "read" })));
@@ -1244,7 +1253,8 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
         />
       )}
       {historyOpen && <OrderHistoryDialog orders={demoOrders} issues={paymentIssues} close={() => setHistoryOpen(false)} refreshed={refreshDemoOrders} />}
-      {supportOpen && <SupportDialog orders={demoOrders} close={() => setSupportOpen(false)} saved={async () => { setSupportOpen(false); await refreshDemoOrders(); showToast("Tu mensaje fue enviado"); }} />}
+      {notificationsOpen && <NotificationCenter notifications={notifications} close={() => setNotificationsOpen(false)} openOrders={() => { setNotificationsOpen(false); setHistoryOpen(true); }} openSupport={() => { setNotificationsOpen(false); setSupportOpen(true); }} />}
+      {supportOpen && <SupportDialog orders={demoOrders} requests={supportRequests} close={() => setSupportOpen(false)} saved={async () => { await refreshDemoOrders(); showToast("Tu mensaje fue enviado"); }} />}
       {adminDish && (
         <AdminDishDialog
           dish={adminDish === "new" ? null : adminDish}
@@ -1758,7 +1768,7 @@ function AdminView({
         <SalesAnalyticsPanel />
         <PaymentSettingsPanel showToast={showToast} />
         <CreditAdminPanel showToast={showToast} refresh={refreshOrders} />
-        <SupportAdminPanel />
+        <SupportAdminPanel showToast={showToast} />
         <StaffAccessPanel showToast={showToast} />
         <section className="panel import-panel">
           <div className="panel-title">
@@ -1837,6 +1847,7 @@ function AdminView({
                 <div>
                   <strong>{order.checkout_number ?? order.order_number}</strong>
                   <span>Pago familiar · {order.service_date} · incluye órdenes separadas por estudiante</span>
+                  <small>Banco seleccionado: {order.bank_label ?? order.bank_name ?? "Sin asignar"}</small>
                   <small>{order.dish}</small>
                   <small>{order.receipt_object_key ? `Comprobante: ${order.receipt_original_name ?? "imagen recibida"}` : "Esperando comprobante del cliente"}</small>
                 </div>
@@ -1934,6 +1945,11 @@ function SalesAnalyticsPanel() {
       {ranking("Grados con más pedidos", "Pedidos e ingresos", (analytics?.topGrades ?? []).map((item) => ({ label: item.label || "Sin grado", count: Number(item.orders), amount: Number(item.revenue_cents) })), maxGrade)}
       {ranking("Días con más ventas", "Según fecha de entrega", (analytics?.weekdays ?? []).map((item) => ({ label: item.label, count: Number(item.orders), amount: Number(item.revenue_cents) })), maxWeekday)}
     </div>
+    <section className="bank-sales-summary">
+      <header><div><h3>Transferencias por banco</h3><p>Totales aprobados según la cuenta seleccionada por el cliente</p></div></header>
+      <div>{(analytics?.byBank ?? []).map((bank) => <article key={bank.id}><span><strong>{bank.label}</strong><small>{bank.bank_name} · {Number(bank.payment_count)} pagos</small></span><b>{money.format(Number(bank.amount_cents) / 100)}</b></article>)}</div>
+      {!analytics?.byBank?.length && <p className="analytics-empty">No hay transferencias aprobadas en este período.</p>}
+    </section>
   </section>;
 }
 
@@ -2028,10 +2044,34 @@ function StaffAccessPanel({ showToast }: { showToast: (message: string) => void 
   return <section className="panel staff-access-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="user" /></span><div><h2>Accesos del personal</h2><p>Solo las personas que invites reciben rol de Administración, Cocina o Entrega</p></div></div><span className="safe-chip">{staff.length} autorizados</span></div><div className="staff-list">{staff.map((person) => <article key={person.id}><div><strong>{person.display_name}</strong><span>{person.email}</span></div><em>{person.roles.split(",").join(" · ")}</em><small>{person.status === "active" ? "Activo" : "Invitado"}</small></article>)}</div><div className="admin-inline-form staff-invite-form"><label><span>Nombre</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label><label><span>Correo autorizado</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Rol</span><select value={role} onChange={(event) => setRole(event.target.value as typeof role)}><option value="kitchen">Cocina</option><option value="delivery">Entrega</option><option value="admin">Administrador</option></select></label><button disabled={busy || displayName.trim().length < 2 || !email.includes("@")} onClick={() => void invite()}>{busy ? "Creando…" : "Crear invitación"}</button></div><p className="panel-footnote">El acceso por PIN para dispositivos compartidos de cocina se configurará cuando definamos el equipo; no usaremos un PIN global compartido.</p></section>;
 }
 
-function SupportAdminPanel() {
-  const [requests, setRequests] = useState<Array<{ id: string; category: string; subject: string; message: string; status: string; display_name: string; order_number: string | null }>>([]);
-  useEffect(() => { void fetch("/api/demo/admin/support").then((response) => response.ok ? response.json() as Promise<{ requests: typeof requests }> : null).then((payload) => payload && setRequests(payload.requests)).catch(() => undefined); }, []);
-  return <section className="panel support-admin-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="help" /></span><div><h2>Mensajes de clientes</h2><p>Comentarios, quejas y solicitudes</p></div></div><span className="safe-chip">{requests.filter((item) => item.status === "open").length} abiertos</span></div><div className="support-admin-list">{requests.slice(0, 6).map((item) => <article key={item.id}><div><strong>{item.subject}</strong><span>{item.display_name}{item.order_number ? ` · ${item.order_number}` : ""}</span></div><p>{item.message}</p><em>{item.category}</em></article>)}{!requests.length && <div className="empty-transfer">No hay mensajes pendientes.</div>}</div></section>;
+type AdminSupportRequest = SupportRequest & { display_name: string; order_number: string | null };
+
+function SupportAdminPanel({ showToast }: { showToast: (message: string) => void }) {
+  const [requests, setRequests] = useState<AdminSupportRequest[]>([]);
+  const load = useCallback(async () => {
+    const response = await fetch("/api/demo/admin/support");
+    if (!response.ok) return;
+    const payload = await response.json() as { requests: AdminSupportRequest[] };
+    setRequests(payload.requests);
+  }, []);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+  return <section className="panel support-admin-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="help" /></span><div><h2>Mensajes de clientes</h2><p>Responde, da seguimiento y cierra solicitudes</p></div></div><span className="safe-chip">{requests.filter((item) => ["open", "in_progress"].includes(item.status)).length} pendientes</span></div><div className="support-admin-list">{requests.map((item) => <SupportAdminItem key={item.id} item={item} saved={async () => { await load(); showToast("Mensaje actualizado"); }} showToast={showToast} />)}{!requests.length && <div className="empty-transfer">No hay mensajes pendientes.</div>}</div></section>;
+}
+
+function SupportAdminItem({ item, saved, showToast }: { item: AdminSupportRequest; saved: () => Promise<void>; showToast: (message: string) => void }) {
+  const [note, setNote] = useState(item.admin_note ?? "");
+  const [status, setStatus] = useState(item.status);
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try {
+      const response = await fetch(`/api/demo/admin/support/${item.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ adminNote: note, status }) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "No se pudo actualizar el mensaje");
+      await saved();
+    } catch (cause) { showToast(cause instanceof Error ? cause.message : "No se pudo actualizar el mensaje"); } finally { setBusy(false); }
+  };
+  return <article><header><div><strong>{item.subject}</strong><span>{item.display_name}{item.order_number ? ` · ${item.order_number}` : ""}</span></div><em>{item.category}</em></header><p>{item.message}</p><label><span>Respuesta para el cliente</span><textarea value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} placeholder="Escribe la respuesta que verá el cliente" /></label><footer><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="open">Abierto</option><option value="in_progress">En seguimiento</option><option value="resolved">Resuelto</option><option value="closed">Cerrado</option></select><button disabled={busy} onClick={() => void save()}>{busy ? "Guardando…" : "Guardar respuesta"}</button></footer></article>;
 }
 
 function MetricCard({ icon, value, label, detail, tone }: { icon: string; value: string; label: string; detail: string; tone: string }) {
@@ -2842,7 +2882,17 @@ function OrderHistoryDialog({ orders, issues, close, refreshed }: { orders: Demo
   );
 }
 
-function SupportDialog({ orders, close, saved }: { orders: DemoOrder[]; close: () => void; saved: () => Promise<void> }) {
+function NotificationCenter({ notifications, close, openOrders, openSupport }: { notifications: AppNotification[]; close: () => void; openOrders: () => void; openSupport: () => void }) {
+  const copy: Record<string, { title: string; message: string; action: "orders" | "support" }> = {
+    payment_approved: { title: "Pago confirmado", message: "Tu transferencia fue aprobada y el pedido ya pasó a cocina.", action: "orders" },
+    payment_amount_mismatch: { title: "Revisa el monto transferido", message: "Encontramos una diferencia en el comprobante. Revisa tu pedido para indicar cómo deseas continuar.", action: "orders" },
+    order_delivered: { title: "Almuerzo entregado", message: "La institución confirmó que el almuerzo fue entregado.", action: "orders" },
+    support_response: { title: "Pipiro respondió tu mensaje", message: "Ya puedes leer la respuesta en la sección de Ayuda.", action: "support" },
+  };
+  return <div className="modal-backdrop profile-backdrop" role="presentation" onMouseDown={close}><section className="profile-dialog notification-dialog" role="dialog" aria-modal="true" aria-labelledby="notifications-title" onMouseDown={(event) => event.stopPropagation()}><header><div><p className="eyebrow">ACTUALIZACIONES</p><h2 id="notifications-title">Notificaciones</h2></div><button className="close-button" onClick={close} aria-label="Cerrar">×</button></header><div className="notification-list">{notifications.map((notification) => { const detail = copy[notification.template_key] ?? { title: "Actualización de tu pedido", message: "Hay nueva información disponible en Pipiro.", action: "orders" as const }; return <button key={notification.id} onClick={detail.action === "support" ? openSupport : openOrders}><span><PipiroIcon name={notification.template_key === "order_delivered" ? "check" : "alert"} /></span><div><strong>{detail.title}</strong><p>{detail.message}</p><small>{new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Tegucigalpa" }).format(new Date(`${notification.created_at.replace(" ", "T")}Z`))}</small></div></button>; })}{!notifications.length && <div className="empty-transfer">No tienes notificaciones todavía.</div>}</div></section></div>;
+}
+
+function SupportDialog({ orders, requests, close, saved }: { orders: DemoOrder[]; requests: SupportRequest[]; close: () => void; saved: () => Promise<void> }) {
   const [category, setCategory] = useState("request");
   const [orderId, setOrderId] = useState("");
   const [subject, setSubject] = useState("");
@@ -2858,5 +2908,5 @@ function SupportDialog({ orders, close, saved }: { orders: DemoOrder[]; close: (
       await saved();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo enviar"); } finally { setBusy(false); }
   };
-  return <div className="modal-backdrop profile-backdrop" role="presentation" onMouseDown={close}><section className="profile-dialog support-dialog" role="dialog" aria-modal="true" aria-labelledby="support-title" onMouseDown={(event) => event.stopPropagation()}><header><div><p className="eyebrow">AYUDA PIPIRO</p><h2 id="support-title">¿Cómo podemos ayudarte?</h2></div><button className="close-button" onClick={close} aria-label="Cerrar">×</button></header><div className="profile-form-grid"><label><span>Tipo</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="request">Solicitud</option><option value="comment">Comentario</option><option value="complaint">Queja</option><option value="payment">Pago</option><option value="other">Otro</option></select></label><label><span>Pedido relacionado (opcional)</span><select value={orderId} onChange={(event) => setOrderId(event.target.value)}><option value="">Ninguno</option>{orders.map((order) => <option value={order.id} key={order.id}>{order.order_number} · {order.student_name}</option>)}</select></label><label className="full-field"><span>Asunto</span><input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={120} /></label><label className="full-field"><span>Mensaje</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength={2000} placeholder="Cuéntanos qué ocurrió o qué necesitas" /></label></div>{error && <p className="form-error">{error}</p>}<footer><button className="confirm-button" disabled={busy || subject.trim().length < 3 || message.trim().length < 10} onClick={() => void submit()}>{busy ? "Enviando…" : "Enviar mensaje"}</button></footer></section></div>;
+  return <div className="modal-backdrop profile-backdrop" role="presentation" onMouseDown={close}><section className="profile-dialog support-dialog" role="dialog" aria-modal="true" aria-labelledby="support-title" onMouseDown={(event) => event.stopPropagation()}><header><div><p className="eyebrow">AYUDA PIPIRO</p><h2 id="support-title">¿Cómo podemos ayudarte?</h2></div><button className="close-button" onClick={close} aria-label="Cerrar">×</button></header>{requests.length > 0 && <div className="support-history"><h3>Mis mensajes</h3>{requests.map((request) => <article key={request.id}><header><strong>{request.subject}</strong><em>{({ open: "Abierto", in_progress: "En seguimiento", resolved: "Resuelto", closed: "Cerrado" } as Record<string, string>)[request.status] ?? request.status}</em></header><p>{request.message}</p>{request.admin_note && <div><strong>Respuesta de Pipiro</strong><p>{request.admin_note}</p></div>}</article>)}</div>}<div className="profile-form-grid"><label><span>Tipo</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="request">Solicitud</option><option value="comment">Comentario</option><option value="complaint">Queja</option><option value="payment">Pago</option><option value="other">Otro</option></select></label><label><span>Pedido relacionado (opcional)</span><select value={orderId} onChange={(event) => setOrderId(event.target.value)}><option value="">Ninguno</option>{orders.map((order) => <option value={order.id} key={order.id}>{order.order_number} · {order.student_name}</option>)}</select></label><label className="full-field"><span>Asunto</span><input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={120} /></label><label className="full-field"><span>Mensaje</span><textarea value={message} onChange={(event) => setMessage(event.target.value)} maxLength={2000} placeholder="Cuéntanos qué ocurrió o qué necesitas" /></label></div>{error && <p className="form-error">{error}</p>}<footer><button className="confirm-button" disabled={busy || subject.trim().length < 3 || message.trim().length < 10} onClick={() => void submit()}>{busy ? "Enviando…" : "Enviar mensaje"}</button></footer></section></div>;
 }

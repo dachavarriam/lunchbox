@@ -966,11 +966,37 @@ input:focus-visible {
 .payment-issue button { background: #fff; border: 0; border-radius: 9px; color: #7a3b1b; cursor: pointer; font-size: 11px; font-weight: 800; padding: 8px 10px; }
 .support-admin-panel { grid-column: 1 / -1; }
 .support-admin-list { display: grid; gap: 8px; }
-.support-admin-list article { align-items: start; background: #f1f4f8; border-radius: 11px; display: grid; gap: 8px; grid-template-columns: 180px 1fr auto; padding: 11px; }
+.support-admin-list article { background: #f1f4f8; border-radius: 11px; display: grid; gap: 10px; padding: 12px; }
+.support-admin-list article > header, .support-admin-list article > footer { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
 .support-admin-list article div { display: grid; gap: 3px; }
 .support-admin-list strong { font-size: 12px; }
 .support-admin-list span, .support-admin-list p, .support-admin-list em { color: var(--muted); font-size: 11px; margin: 0; }
 .support-admin-list em { background: #fff; border-radius: 999px; font-style: normal; padding: 5px 8px; }
+.support-admin-list label { display: grid; gap: 5px; }
+.support-admin-list textarea { background: #fff; border: 0; border-radius: 10px; color: var(--ink); font: inherit; min-height: 72px; padding: 10px; resize: vertical; }
+.support-admin-list select, .support-admin-list button { border: 0; border-radius: 9px; font: inherit; min-height: 38px; padding: 8px 11px; }
+.support-admin-list button { background: var(--navy); color: #fff; cursor: pointer; font-weight: 800; }
+.bank-sales-summary { background: #f7f9fc; border-radius: 14px; margin-top: 12px; padding: 14px; }
+.bank-sales-summary h3 { font-size: 12px; margin: 0; }
+.bank-sales-summary header p { color: var(--muted); font-size: 9px; margin: 3px 0 12px; }
+.bank-sales-summary > div { display: grid; gap: 7px; }
+.bank-sales-summary article { align-items: center; background: #fff; border-radius: 10px; display: flex; justify-content: space-between; padding: 10px 12px; }
+.bank-sales-summary article span { display: grid; gap: 2px; }
+.bank-sales-summary article strong, .bank-sales-summary article b { font-size: 11px; }
+.bank-sales-summary article small { color: var(--muted); font-size: 9px; }
+.notification-list { display: grid; gap: 8px; max-height: 60vh; overflow-y: auto; }
+.notification-list > button { align-items: start; background: #f1f4f8; border: 0; border-radius: 12px; color: var(--ink); cursor: pointer; display: flex; gap: 10px; padding: 12px; text-align: left; width: 100%; }
+.notification-list > button > span { color: var(--blue); padding-top: 2px; }
+.notification-list > button > div { display: grid; gap: 4px; }
+.notification-list strong { font-size: 12px; }
+.notification-list p, .notification-list small { color: var(--muted); font-size: 10px; line-height: 1.4; margin: 0; }
+.support-history { display: grid; gap: 8px; margin-bottom: 16px; max-height: 250px; overflow-y: auto; }
+.support-history > h3 { font-size: 12px; margin: 0; }
+.support-history article { background: #f1f4f8; border-radius: 11px; display: grid; gap: 7px; padding: 11px; }
+.support-history article > header { align-items: center; display: flex; justify-content: space-between; }
+.support-history article em { background: #fff; border-radius: 999px; color: var(--muted); font-size: 9px; font-style: normal; padding: 4px 7px; }
+.support-history article p { color: var(--muted); font-size: 10px; margin: 0; }
+.support-history article > div { background: #fff; border-radius: 9px; display: grid; gap: 3px; padding: 9px; }
 .allergy-alert { align-items: center; display: flex; gap: 5px; }
 
 .profile-form-grid input,

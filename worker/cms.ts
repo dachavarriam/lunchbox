@@ -43,8 +43,7 @@ function validDate(value: string | null): value is string {
 }
 
 async function loadAdminAnalytics(env: Env, startDate: string, endDate: string): Promise<Record<string, unknown>> {
-  const realCustomer = "pb.guardian_user_id != 'user_demo_family'";
-  const [summary, orderSummary, dishes, grades, weekdays, daily] = await Promise.all([
+  const [summary, orderSummary, dishes, grades, weekdays, daily, banks] = await Promise.all([
     env.DB.prepare(
       `SELECT COUNT(*) AS payment_count,
               COALESCE(SUM(CASE WHEN pb.status = 'approved' THEN 1 ELSE 0 END), 0) AS approved_payment_count,
@@ -53,15 +52,15 @@ async function loadAdminAnalytics(env: Env, startDate: string, endDate: string):
               COALESCE(SUM(CASE WHEN pb.status = 'approved' THEN pb.credit_applied_cents ELSE 0 END), 0) AS credit_used_cents,
               COALESCE(SUM(CASE WHEN pb.status IN ('pending', 'under_review', 'amount_mismatch') THEN pb.amount_due_cents ELSE 0 END), 0) AS pending_cents
        FROM payment_batches pb
-       WHERE ${realCustomer} AND date(pb.created_at) BETWEEN ? AND ?`,
+       WHERE date(pb.created_at, '-6 hours') BETWEEN ? AND ?`,
     ).bind(startDate, endDate).first(),
     env.DB.prepare(
       `SELECT COUNT(DISTINCT o.id) AS approved_order_count
        FROM payment_batches pb
        JOIN payment_batch_orders pbo ON pbo.payment_batch_id = pb.id
        JOIN orders o ON o.id = pbo.order_id
-       WHERE ${realCustomer} AND pb.status = 'approved' AND o.status != 'cancelled'
-         AND date(pb.created_at) BETWEEN ? AND ?`,
+       WHERE pb.status = 'approved' AND o.status != 'cancelled'
+         AND date(pb.created_at, '-6 hours') BETWEEN ? AND ?`,
     ).bind(startDate, endDate).first(),
     env.DB.prepare(
       `SELECT oi.dish_name_snapshot AS label, SUM(oi.quantity) AS quantity,
@@ -70,7 +69,7 @@ async function loadAdminAnalytics(env: Env, startDate: string, endDate: string):
        JOIN payment_batch_orders pbo ON pbo.payment_batch_id = pb.id
        JOIN orders o ON o.id = pbo.order_id
        JOIN order_items oi ON oi.order_id = o.id
-       WHERE ${realCustomer} AND pb.status = 'approved' AND date(pb.created_at) BETWEEN ? AND ?
+       WHERE pb.status = 'approved' AND date(pb.created_at, '-6 hours') BETWEEN ? AND ?
          AND o.status != 'cancelled'
        GROUP BY oi.dish_name_snapshot ORDER BY quantity DESC, revenue_cents DESC LIMIT 8`,
     ).bind(startDate, endDate).all(),
@@ -81,7 +80,7 @@ async function loadAdminAnalytics(env: Env, startDate: string, endDate: string):
        JOIN orders o ON o.id = pbo.order_id
        JOIN students s ON s.id = o.student_id
        LEFT JOIN classrooms c ON c.id = s.classroom_id
-       WHERE ${realCustomer} AND pb.status = 'approved' AND date(pb.created_at) BETWEEN ? AND ?
+       WHERE pb.status = 'approved' AND date(pb.created_at, '-6 hours') BETWEEN ? AND ?
          AND o.status != 'cancelled'
        GROUP BY c.grade ORDER BY orders DESC, revenue_cents DESC LIMIT 8`,
     ).bind(startDate, endDate).all(),
@@ -96,17 +95,30 @@ async function loadAdminAnalytics(env: Env, startDate: string, endDate: string):
        JOIN payment_batch_orders pbo ON pbo.payment_batch_id = pb.id
        JOIN orders o ON o.id = pbo.order_id
        JOIN menu_days md ON md.id = o.menu_day_id
-       WHERE ${realCustomer} AND pb.status = 'approved' AND date(pb.created_at) BETWEEN ? AND ?
+       WHERE pb.status = 'approved' AND date(pb.created_at, '-6 hours') BETWEEN ? AND ?
          AND o.status != 'cancelled'
        GROUP BY weekday_number ORDER BY orders DESC, revenue_cents DESC`,
     ).bind(startDate, endDate).all(),
     env.DB.prepare(
-      `SELECT date(pb.created_at) AS date,
+      `SELECT date(pb.created_at, '-6 hours') AS date,
               SUM(CASE WHEN pb.status = 'approved' THEN pb.subtotal_cents ELSE 0 END) AS sales_cents,
               SUM(CASE WHEN pb.status = 'approved' THEN 1 ELSE 0 END) AS approved_payments
        FROM payment_batches pb
-       WHERE ${realCustomer} AND date(pb.created_at) BETWEEN ? AND ?
-       GROUP BY date(pb.created_at) ORDER BY date(pb.created_at)`,
+       WHERE date(pb.created_at, '-6 hours') BETWEEN ? AND ?
+       GROUP BY date(pb.created_at, '-6 hours') ORDER BY date(pb.created_at, '-6 hours')`,
+    ).bind(startDate, endDate).all(),
+    env.DB.prepare(
+      `SELECT COALESCE(ba.id, 'unassigned') AS id,
+              COALESCE(ba.label, 'Banco sin asignar') AS label,
+              COALESCE(ba.bank_name, 'Sin asignar') AS bank_name,
+              COUNT(*) AS payment_count,
+              COALESCE(SUM(pb.amount_due_cents), 0) AS amount_cents
+       FROM payment_batches pb
+       LEFT JOIN bank_accounts ba ON ba.id = pb.bank_account_id
+       WHERE pb.status = 'approved' AND pb.payment_method IN ('bank_transfer', 'credit_transfer')
+         AND date(pb.created_at, '-6 hours') BETWEEN ? AND ?
+       GROUP BY COALESCE(ba.id, 'unassigned'), COALESCE(ba.label, 'Banco sin asignar'), COALESCE(ba.bank_name, 'Sin asignar')
+       ORDER BY amount_cents DESC, label COLLATE NOCASE`,
     ).bind(startDate, endDate).all(),
   ]);
   return {
@@ -116,6 +128,7 @@ async function loadAdminAnalytics(env: Env, startDate: string, endDate: string):
     topGrades: grades.results,
     weekdays: weekdays.results,
     daily: daily.results,
+    byBank: banks.results,
   };
 }
 
@@ -399,7 +412,6 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
        FROM app_users u
        JOIN user_roles ur ON ur.user_id = u.id AND ur.role = 'customer'
        LEFT JOIN credit_ledger cl ON cl.user_id = u.id
-       WHERE u.id != 'user_demo_family'
        GROUP BY u.id
        ORDER BY u.display_name COLLATE NOCASE, u.email COLLATE NOCASE
        LIMIT 250`,
@@ -524,10 +536,40 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     const requests = await env.DB.prepare(
       `SELECT sr.*, u.display_name, o.order_number FROM support_requests sr JOIN app_users u ON u.id = sr.user_id
        LEFT JOIN orders o ON o.id = sr.order_id
-       WHERE sr.user_id != 'user_demo_family'
        ORDER BY CASE sr.status WHEN 'open' THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 100`,
     ).all();
     return cmsJson({ requests: requests.results });
+  }
+
+  const supportMatch = url.pathname.match(/^\/api\/demo\/admin\/support\/([^/]+)$/);
+  if (request.method === "PATCH" && supportMatch) {
+    const body = await boundedJson(request);
+    if (!isRecord(body) || !["open", "in_progress", "resolved", "closed"].includes(String(body.status)) ||
+        typeof body.adminNote !== "string" || body.adminNote.length > 2000) {
+      return cmsJson({ error: "Respuesta o estado inválido" }, { status: 400 });
+    }
+    const adminNote = body.adminNote.trim();
+    const support = await env.DB.prepare(
+      `SELECT sr.id, sr.user_id, sr.order_id, sr.admin_note, u.email
+       FROM support_requests sr JOIN app_users u ON u.id = sr.user_id WHERE sr.id = ? LIMIT 1`,
+    ).bind(supportMatch[1]).first<{ id: string; user_id: string; order_id: string | null; admin_note: string | null; email: string }>();
+    if (!support) return cmsJson({ error: "Mensaje no encontrado" }, { status: 404 });
+    const statements: D1PreparedStatement[] = [
+      env.DB.prepare("UPDATE support_requests SET status = ?, admin_note = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(body.status, adminNote || null, support.id),
+      env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, metadata_json) VALUES (?, ?, 'support.updated', 'support_request', ?, ?)")
+        .bind(crypto.randomUUID(), actorUserId, support.id, JSON.stringify({ status: body.status })),
+    ];
+    if (adminNote && adminNote !== support.admin_note) statements.push(
+      env.DB.prepare("INSERT INTO notifications (id, user_id, order_id, channel, template_key) VALUES (?, ?, ?, 'in_app', 'support_response')")
+        .bind(crypto.randomUUID(), support.user_id, support.order_id),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, ?, ?, 'email', 'support_response', ?)")
+        .bind(crypto.randomUUID(), support.user_id, support.order_id, support.email, JSON.stringify({ supportRequestId: support.id })),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'push', 'support_response', ?)")
+        .bind(crypto.randomUUID(), support.user_id, support.order_id, JSON.stringify({ supportRequestId: support.id })),
+    );
+    await env.DB.batch(statements);
+    return cmsJson({ ok: true, status: body.status });
   }
 
   if (request.method === "POST" && url.pathname === "/api/demo/admin/dishes") {

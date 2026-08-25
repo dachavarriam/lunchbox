@@ -47,6 +47,9 @@ type DemoOrderRow = {
   payment_batch_id: string | null;
   checkout_number: string | null;
   payment_expires_at: string | null;
+  bank_account_id: string | null;
+  bank_label: string | null;
+  bank_name: string | null;
   created_at: string;
   prep_time_minutes: number;
   stage_started_at: string;
@@ -233,7 +236,7 @@ async function expireUnpaidBatches(env: Env): Promise<void> {
   }
 }
 
-async function loadDemoOrders(env: Env, actorUserId: string | null, excludeDemoActor = false): Promise<DemoOrderRow[]> {
+async function loadDemoOrders(env: Env, actorUserId: string | null): Promise<DemoOrderRow[]> {
   await expireUnpaidBatches(env);
   const result = await env.DB.prepare(
     `SELECT o.id, o.order_number, o.status, o.total_cents, o.created_at,
@@ -255,7 +258,8 @@ async function loadDemoOrders(env: Env, actorUserId: string | null, excludeDemoA
             COALESCE(pb.receipt_object_key, pt.receipt_object_key) AS receipt_object_key,
             COALESCE(pb.receipt_original_name, pt.receipt_original_name) AS receipt_original_name,
             COALESCE(pb.receipt_submitted_at, pt.receipt_submitted_at) AS receipt_submitted_at,
-            pb.id AS payment_batch_id, pb.checkout_number, pb.expires_at AS payment_expires_at
+            pb.id AS payment_batch_id, pb.checkout_number, pb.expires_at AS payment_expires_at,
+            pb.bank_account_id, ba.label AS bank_label, ba.bank_name
      FROM orders o
      JOIN students s ON s.id = o.student_id
      LEFT JOIN classrooms c ON c.id = s.classroom_id
@@ -266,12 +270,12 @@ async function loadDemoOrders(env: Env, actorUserId: string | null, excludeDemoA
      LEFT JOIN payment_transfers pt ON pt.order_id = o.id
      LEFT JOIN payment_batch_orders pbo ON pbo.order_id = o.id
      LEFT JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
+     LEFT JOIN bank_accounts ba ON ba.id = pb.bank_account_id
      WHERE (? IS NULL OR o.guardian_user_id = ?)
-       AND (? = 0 OR o.guardian_user_id != 'user_demo_family')
      GROUP BY o.id
      ORDER BY o.created_at DESC
      LIMIT 100`,
-  ).bind(actorUserId, actorUserId, excludeDemoActor ? 1 : 0).all<DemoOrderRow>();
+  ).bind(actorUserId, actorUserId).all<DemoOrderRow>();
   return result.results;
 }
 
@@ -308,7 +312,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
          GROUP BY s.id
          ORDER BY s.created_at`,
       ).bind(actorUserId).all<StudentRow>(),
-      loadDemoOrders(env, adminBootstrapRequest ? null : actorUserId, adminBootstrapRequest),
+      loadDemoOrders(env, adminBootstrapRequest ? null : actorUserId),
       env.DB.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS balance_cents FROM credit_ledger WHERE user_id = ?")
         .bind(actorUserId).first<{ balance_cents: number }>(),
       env.DB.prepare(
@@ -316,7 +320,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
          WHERE pb.guardian_user_id = ? AND pi.status != 'resolved' ORDER BY pi.created_at DESC`,
       ).bind(actorUserId).all(),
       env.DB.prepare(
-        "SELECT id, order_id, category, subject, message, status, created_at FROM support_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 30",
+        "SELECT id, order_id, category, subject, message, status, admin_note, created_at, updated_at FROM support_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 30",
       ).bind(actorUserId).all(),
       env.DB.prepare("SELECT id, order_id, template_key, status, created_at FROM notifications WHERE user_id = ? AND channel = 'in_app' ORDER BY created_at DESC LIMIT 30")
         .bind(actorUserId).all(),
@@ -871,7 +875,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   }
 
   if (request.method === "GET" && url.pathname === "/api/demo/kds") {
-    const orders = await loadDemoOrders(env, null, true);
+    const orders = await loadDemoOrders(env, null);
     return json({
       orders: orders.filter((order) => order.payment_status === "approved" && !["cancelled", "delivered"].includes(order.status)),
     });
@@ -1118,7 +1122,7 @@ const worker = {
         if (access) return access;
       }
       const dispatchPushImmediately = request.method !== "GET" &&
-        (url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/admin\/payment-batches\/[^/]+$/.test(url.pathname));
+        (url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/admin\/(payment-batches|support)\/[^/]+$/.test(url.pathname));
       const cmsResponse = await handleCmsApi(request, env, url);
       if (cmsResponse) {
         if (dispatchPushImmediately && cmsResponse.ok) ctx.waitUntil(processPushOutbox(env));

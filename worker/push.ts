@@ -19,6 +19,7 @@ const pushCopy: Record<string, { title: string; body: string }> = {
   payment_approved: { title: "Pago confirmado", body: "Tu pago fue aprobado y el pedido pasó a cocina." },
   order_delivered: { title: "Almuerzo entregado", body: "La institución confirmó la entrega del almuerzo." },
   support_request_created: { title: "Nueva solicitud de ayuda", body: "Hay un nuevo mensaje de un cliente en Administración." },
+  support_response: { title: "Respuesta de Pipiro", body: "Respondimos tu solicitud de ayuda. Puedes revisarla en la aplicación." },
 };
 
 function allowedPushEndpoint(value: string): boolean {

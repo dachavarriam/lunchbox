@@ -103,7 +103,7 @@ test("isolates production surfaces by hostname before rendering", async () => {
 });
 
 test("ships the local PWA assets, functional migrations and pnpm policy", async () => {
-  const [manifestText, serviceWorker, packageText, workspaceText, wranglerText, functionalMigration, cmsMigration, paymentMigration, authMigration, operationsMigration, customerAccessMigration, authSource, prototypeSource, workerSource, clientAssets] = await Promise.all([
+  const [manifestText, serviceWorker, packageText, workspaceText, wranglerText, functionalMigration, cmsMigration, paymentMigration, authMigration, operationsMigration, customerAccessMigration, officialDataMigration, authSource, prototypeSource, workerSource, cmsSource, clientAssets] = await Promise.all([
     readFile(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -115,9 +115,11 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
     readFile(new URL("../migrations/0010_google_auth_sessions.sql", import.meta.url), "utf8"),
     readFile(new URL("../migrations/0011_staff_kds_and_printing.sql", import.meta.url), "utf8"),
     readFile(new URL("../migrations/0014_admin_customer_access.sql", import.meta.url), "utf8"),
+    readFile(new URL("../migrations/0017_remove_demo_family_and_bank_reporting.sql", import.meta.url), "utf8"),
     readFile(new URL("../worker/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/prototype-app.tsx", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/cms.ts", import.meta.url), "utf8"),
     readdir(new URL("../dist/client/assets/", import.meta.url)),
   ]);
   const manifest = JSON.parse(manifestText);
@@ -153,6 +155,8 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.match(operationsMigration, /CREATE TABLE staff_invitations/);
   assert.match(operationsMigration, /CREATE TABLE print_jobs/);
   assert.match(customerAccessMigration, /'customer', 'school_eis'/);
+  assert.match(officialDataMigration, /DELETE FROM app_users WHERE id = 'user_demo_family'/);
+  assert.match(officialDataMigration, /SET bank_account_id/);
   assert.match(authSource, /code_challenge_method: "S256"/);
   assert.match(authSource, /HttpOnly; SameSite=Lax/);
   assert.match(authSource, /crypto\.subtle\.verify/);
@@ -182,7 +186,9 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.match(prototypeSource, /Tacos de birria/);
   assert.match(prototypeSource, /Ventas y pagos/);
   assert.match(prototypeSource, /Platillos más vendidos/);
-  assert.match(workerSource, /excludeDemoActor/);
+  assert.doesNotMatch(workerSource, /excludeDemoActor/);
+  assert.match(cmsSource, /date\(pb\.created_at, '-6 hours'\)/);
+  assert.match(cmsSource, /COALESCE\(ba\.label, 'Banco sin asignar'\)/);
   assert.match(workerSource, /Los almuerzos deben pedirse con al menos un día de anticipación/);
   assert.match(workerSource, /PAYMENT_RECEIPTS\.put/);
   assert.ok(clientAssets.some((asset) => asset.endsWith(".css")), "production build must emit CSS");
