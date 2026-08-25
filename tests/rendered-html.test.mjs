@@ -75,7 +75,11 @@ test("renders Google login and public legal pages", async () => {
   assert.match(login, /Continuar con Google/);
   assert.match(login, /\/api\/auth\/google\/start/);
   assert.match(privacy, /Aviso de privacidad/);
+  assert.match(privacy, /Datos de estudiantes/);
+  assert.doesNotMatch(privacy, /Borrador para pruebas/);
   assert.match(terms, /Términos de uso/);
+  assert.match(terms, /Cancelaciones, créditos y reembolsos/);
+  assert.doesNotMatch(terms, /Borrador para pruebas/);
 });
 
 test("isolates production surfaces by hostname before rendering", async () => {
@@ -125,7 +129,8 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.equal(manifest.theme_color, "#658BD0");
   assert.match(serviceWorker, /pipiro-logo\.png/);
   assert.match(serviceWorker, /pipiro-fondo\.png/);
-  assert.match(serviceWorker, /pipiro-prototype-v5/);
+  assert.match(serviceWorker, /pipiro-prototype-v6/);
+  assert.match(serviceWorker, /addEventListener\("push"/);
   assert.equal(packageJson.packageManager, "pnpm@11.21.0");
   assert.match(packageJson.scripts["dev:lan"], /--hostname 0\.0\.0\.0/);
   assert.match(workspaceText, /allowBuilds:/);
@@ -154,8 +159,9 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.match(authSource, /authorizeRequest/);
   assert.match(authSource, /No tienes permiso para esta sección/);
   assert.match(authSource, /requestSurface\(url, env\) === "family"/);
-  assert.deepEqual(wranglerConfig.secrets.required, ["GOOGLE_CLIENT_SECRET"]);
+  assert.deepEqual(wranglerConfig.secrets.required, ["GOOGLE_CLIENT_SECRET", "VAPID_PRIVATE_KEY"]);
   assert.equal(Object.hasOwn(wranglerConfig.vars, "GOOGLE_CLIENT_SECRET"), false);
+  assert.equal(Object.hasOwn(wranglerConfig.vars, "VAPID_PRIVATE_KEY"), false);
   assert.equal(wranglerConfig.r2_buckets.some((bucket) => bucket.binding === "PAYMENT_RECEIPTS" && bucket.bucket_name === "pipiro"), true);
   assert.match(prototypeSource, /pipiro:order-draft:v1/);
   assert.match(prototypeSource, /typeof cryptoApi\.randomUUID === "function"/);
@@ -173,7 +179,10 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.match(prototypeSource, /candidate\.payment_batch_id === order\.payment_batch_id && candidate\.status !== "cancelled"/);
   assert.doesNotMatch(prototypeSource, /Solo almuerzos|Lunch only/);
   assert.match(prototypeSource, /Alergias del perfil/);
-  assert.match(prototypeSource, /Tacos Birria/);
+  assert.match(prototypeSource, /Tacos de birria/);
+  assert.match(prototypeSource, /Ventas y pagos/);
+  assert.match(prototypeSource, /Platillos más vendidos/);
+  assert.match(workerSource, /excludeDemoActor/);
   assert.match(workerSource, /Los almuerzos deben pedirse con al menos un día de anticipación/);
   assert.match(workerSource, /PAYMENT_RECEIPTS\.put/);
   assert.ok(clientAssets.some((asset) => asset.endsWith(".css")), "production build must emit CSS");

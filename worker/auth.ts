@@ -346,8 +346,11 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
       await env.DB.batch(statements);
     }
 
-    await env.DB.prepare("UPDATE app_users SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'invited'")
-      .bind(userId).run();
+    await env.DB.prepare(
+      `UPDATE app_users SET display_name = ?,
+       status = CASE WHEN status = 'invited' THEN 'active' ELSE status END,
+       updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+    ).bind(claims.name.slice(0, 120), userId).run();
     if (requestSurface(url, env) === "family") {
       await env.DB.prepare(
         "INSERT OR IGNORE INTO user_roles (user_id, role, school_id) VALUES (?, 'customer', 'school_eis')",

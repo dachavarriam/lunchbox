@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "lonchera-solo-mexico",
   "main": "./worker/index.ts",
-  "compatibility_date": "2026-08-08",
+  "compatibility_date": "2026-08-24",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "routes": [
@@ -16,6 +16,9 @@
   },
   "images": {
     "binding": "IMAGES"
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
   },
   "d1_databases": [
     {
@@ -49,7 +52,9 @@
     "APP_ORIGIN": "https://pipiro.solomexicohn.com",
     "ADMIN_ORIGIN": "https://admin-pipiro.solomexicohn.com",
     "KDS_ORIGIN": "https://kds-pipiro.solomexicohn.com",
-    "GOOGLE_CLIENT_ID": "269563097261-igerbhrdb7prc3a5vnvsqd2k0bi4jlut.apps.googleusercontent.com"
+    "GOOGLE_CLIENT_ID": "269563097261-igerbhrdb7prc3a5vnvsqd2k0bi4jlut.apps.googleusercontent.com",
+    "VAPID_PUBLIC_KEY": "BAnZDyTlMXVSYsTPCKNrCZCNzK-HMXh-bURHG6UFsTEFsxitG8xwk3XCer5bSnGk8M8MRTiYX2Ph86n3M2tmhHQ",
+    "VAPID_SUBJECT": "mailto:pedidos@solomexicohn.com"
   },
   "observability": {
     "enabled": true,
@@ -59,6 +64,6 @@
     }
   },
   "secrets": {
-    "required": ["GOOGLE_CLIENT_SECRET"]
+    "required": ["GOOGLE_CLIENT_SECRET", "VAPID_PRIVATE_KEY"]
   }
 }

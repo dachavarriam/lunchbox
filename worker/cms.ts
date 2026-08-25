@@ -38,6 +38,87 @@ type CmsDishRow = Record<string, string | number | null> & { id: string };
 type CmsGroupRow = Record<string, string | number | null> & { id: string; dish_id: string };
 type CmsOptionRow = Record<string, string | number | null> & { id: string; group_id: string };
 
+function validDate(value: string | null): value is string {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+async function loadAdminAnalytics(env: Env, startDate: string, endDate: string): Promise<Record<string, unknown>> {
+  const realCustomer = "pb.guardian_user_id != 'user_demo_family'";
+  const [summary, orderSummary, dishes, grades, weekdays, daily] = await Promise.all([
+    env.DB.prepare(
+      `SELECT COUNT(*) AS payment_count,
+              COALESCE(SUM(CASE WHEN pb.status = 'approved' THEN 1 ELSE 0 END), 0) AS approved_payment_count,
+              COALESCE(SUM(CASE WHEN pb.status = 'approved' THEN pb.subtotal_cents ELSE 0 END), 0) AS sales_cents,
+              COALESCE(SUM(CASE WHEN pb.status = 'approved' THEN pb.amount_due_cents ELSE 0 END), 0) AS cash_collected_cents,
+              COALESCE(SUM(CASE WHEN pb.status = 'approved' THEN pb.credit_applied_cents ELSE 0 END), 0) AS credit_used_cents,
+              COALESCE(SUM(CASE WHEN pb.status IN ('pending', 'under_review', 'amount_mismatch') THEN pb.amount_due_cents ELSE 0 END), 0) AS pending_cents
+       FROM payment_batches pb
+       WHERE ${realCustomer} AND date(pb.created_at) BETWEEN ? AND ?`,
+    ).bind(startDate, endDate).first(),
+    env.DB.prepare(
+      `SELECT COUNT(DISTINCT o.id) AS approved_order_count
+       FROM payment_batches pb
+       JOIN payment_batch_orders pbo ON pbo.payment_batch_id = pb.id
+       JOIN orders o ON o.id = pbo.order_id
+       WHERE ${realCustomer} AND pb.status = 'approved' AND o.status != 'cancelled'
+         AND date(pb.created_at) BETWEEN ? AND ?`,
+    ).bind(startDate, endDate).first(),
+    env.DB.prepare(
+      `SELECT oi.dish_name_snapshot AS label, SUM(oi.quantity) AS quantity,
+              SUM(oi.unit_price_cents * oi.quantity) AS revenue_cents
+       FROM payment_batches pb
+       JOIN payment_batch_orders pbo ON pbo.payment_batch_id = pb.id
+       JOIN orders o ON o.id = pbo.order_id
+       JOIN order_items oi ON oi.order_id = o.id
+       WHERE ${realCustomer} AND pb.status = 'approved' AND date(pb.created_at) BETWEEN ? AND ?
+         AND o.status != 'cancelled'
+       GROUP BY oi.dish_name_snapshot ORDER BY quantity DESC, revenue_cents DESC LIMIT 8`,
+    ).bind(startDate, endDate).all(),
+    env.DB.prepare(
+      `SELECT c.grade AS label, COUNT(DISTINCT o.id) AS orders, SUM(o.total_cents) AS revenue_cents
+       FROM payment_batches pb
+       JOIN payment_batch_orders pbo ON pbo.payment_batch_id = pb.id
+       JOIN orders o ON o.id = pbo.order_id
+       JOIN students s ON s.id = o.student_id
+       LEFT JOIN classrooms c ON c.id = s.classroom_id
+       WHERE ${realCustomer} AND pb.status = 'approved' AND date(pb.created_at) BETWEEN ? AND ?
+         AND o.status != 'cancelled'
+       GROUP BY c.grade ORDER BY orders DESC, revenue_cents DESC LIMIT 8`,
+    ).bind(startDate, endDate).all(),
+    env.DB.prepare(
+      `SELECT CASE strftime('%w', md.service_date)
+                WHEN '0' THEN 'Domingo' WHEN '1' THEN 'Lunes' WHEN '2' THEN 'Martes'
+                WHEN '3' THEN 'Miércoles' WHEN '4' THEN 'Jueves' WHEN '5' THEN 'Viernes' ELSE 'Sábado'
+              END AS label,
+              COUNT(DISTINCT o.id) AS orders, SUM(o.total_cents) AS revenue_cents,
+              CAST(strftime('%w', md.service_date) AS INTEGER) AS weekday_number
+       FROM payment_batches pb
+       JOIN payment_batch_orders pbo ON pbo.payment_batch_id = pb.id
+       JOIN orders o ON o.id = pbo.order_id
+       JOIN menu_days md ON md.id = o.menu_day_id
+       WHERE ${realCustomer} AND pb.status = 'approved' AND date(pb.created_at) BETWEEN ? AND ?
+         AND o.status != 'cancelled'
+       GROUP BY weekday_number ORDER BY orders DESC, revenue_cents DESC`,
+    ).bind(startDate, endDate).all(),
+    env.DB.prepare(
+      `SELECT date(pb.created_at) AS date,
+              SUM(CASE WHEN pb.status = 'approved' THEN pb.subtotal_cents ELSE 0 END) AS sales_cents,
+              SUM(CASE WHEN pb.status = 'approved' THEN 1 ELSE 0 END) AS approved_payments
+       FROM payment_batches pb
+       WHERE ${realCustomer} AND date(pb.created_at) BETWEEN ? AND ?
+       GROUP BY date(pb.created_at) ORDER BY date(pb.created_at)`,
+    ).bind(startDate, endDate).all(),
+  ]);
+  return {
+    range: { startDate, endDate },
+    summary: { ...(summary ?? {}), ...(orderSummary ?? {}) },
+    topDishes: dishes.results,
+    topGrades: grades.results,
+    weekdays: weekdays.results,
+    daily: daily.results,
+  };
+}
+
 function cmsJson(data: unknown, init?: ResponseInit): Response {
   return Response.json(data, { ...init, headers: { ...cmsJsonHeaders, ...init?.headers } });
 }
@@ -226,6 +307,16 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     return cmsJson(await loadCms(env, start));
   }
 
+  if (request.method === "GET" && url.pathname === "/api/demo/admin/analytics") {
+    const today = new Date().toISOString().slice(0, 10);
+    const start = url.searchParams.get("start") ?? `${today.slice(0, 8)}01`;
+    const end = url.searchParams.get("end") ?? today;
+    if (!validDate(start) || !validDate(end) || start > end) {
+      return cmsJson({ error: "Rango de fechas inválido" }, { status: 400 });
+    }
+    return cmsJson(await loadAdminAnalytics(env, start, end));
+  }
+
   const receiptMatch = url.pathname.match(/^\/api\/demo\/admin\/payments\/([^/]+)\/receipt$/);
   if (request.method === "GET" && receiptMatch) {
     const payment = await env.DB.prepare(
@@ -256,28 +347,48 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
   }
 
   if (request.method === "GET" && url.pathname === "/api/demo/admin/payment-settings") {
-    const settings = await env.DB.prepare(
-      "SELECT bank_name, account_holder, account_number, account_type, updated_at FROM payment_settings WHERE id = 'default'",
-    ).first();
-    return cmsJson({ settings });
+    const accounts = await env.DB.prepare(
+      "SELECT id, label, bank_name, account_holder, account_number, account_type, instructions, is_active, sort_order, updated_at FROM bank_accounts ORDER BY is_active DESC, sort_order, bank_name",
+    ).all();
+    return cmsJson({ accounts: accounts.results });
   }
 
-  if (request.method === "PUT" && url.pathname === "/api/demo/admin/payment-settings") {
+  if (request.method === "POST" && url.pathname === "/api/demo/admin/payment-settings") {
     const body = await boundedJson(request);
     if (!isRecord(body)) return cmsJson({ error: "Configuración inválida" }, { status: 400 });
+    const label = requiredText(body.label, 100);
     const bankName = requiredText(body.bankName, 100);
     const accountHolder = requiredText(body.accountHolder, 120);
     const accountNumber = requiredText(body.accountNumber, 100);
     const accountType = requiredText(body.accountType, 100);
-    if (!bankName || !accountHolder || !accountNumber || !accountType) return cmsJson({ error: "Completa todos los campos bancarios" }, { status: 400 });
+    const instructions = typeof body.instructions === "string" ? body.instructions.trim().slice(0, 240) : "";
+    if (!label || !bankName || !accountHolder || !accountNumber || !accountType) return cmsJson({ error: "Completa todos los campos bancarios" }, { status: 400 });
+    const id = crypto.randomUUID();
     await env.DB.batch([
       env.DB.prepare(
-        `UPDATE payment_settings SET bank_name = ?, account_holder = ?, account_number = ?, account_type = ?,
-         updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 'default'`,
-      ).bind(bankName, accountHolder, accountNumber, accountType, actorUserId),
+        `INSERT INTO bank_accounts (id, label, bank_name, account_holder, account_number, account_type, instructions, updated_by_user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(id, label, bankName, accountHolder, accountNumber, accountType, instructions || null, actorUserId),
       env.DB.prepare(
-        "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'payment_settings.updated', 'payment_settings', 'default')",
-      ).bind(crypto.randomUUID(), actorUserId),
+        "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'bank_account.created', 'bank_account', ?)",
+      ).bind(crypto.randomUUID(), actorUserId, id),
+    ]);
+    return cmsJson({ ok: true, id }, { status: 201 });
+  }
+
+  const bankMatch = url.pathname.match(/^\/api\/demo\/admin\/payment-settings\/([^/]+)$/);
+  if (request.method === "PATCH" && bankMatch) {
+    const body = await boundedJson(request);
+    if (!isRecord(body)) return cmsJson({ error: "Configuración inválida" }, { status: 400 });
+    const label = requiredText(body.label, 100); const bankName = requiredText(body.bankName, 100);
+    const accountHolder = requiredText(body.accountHolder, 120); const accountNumber = requiredText(body.accountNumber, 100);
+    const accountType = requiredText(body.accountType, 100); const instructions = typeof body.instructions === "string" ? body.instructions.trim().slice(0, 240) : "";
+    if (!label || !bankName || !accountHolder || !accountNumber || !accountType || typeof body.isActive !== "boolean") return cmsJson({ error: "Completa todos los campos bancarios" }, { status: 400 });
+    await env.DB.batch([
+      env.DB.prepare(`UPDATE bank_accounts SET label = ?, bank_name = ?, account_holder = ?, account_number = ?, account_type = ?, instructions = ?, is_active = ?, updated_by_user_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+        .bind(label, bankName, accountHolder, accountNumber, accountType, instructions || null, body.isActive ? 1 : 0, actorUserId, bankMatch[1]),
+      env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'bank_account.updated', 'bank_account', ?)")
+        .bind(crypto.randomUUID(), actorUserId, bankMatch[1]),
     ]);
     return cmsJson({ ok: true });
   }
@@ -288,6 +399,7 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
        FROM app_users u
        JOIN user_roles ur ON ur.user_id = u.id AND ur.role = 'customer'
        LEFT JOIN credit_ledger cl ON cl.user_id = u.id
+       WHERE u.id != 'user_demo_family'
        GROUP BY u.id
        ORDER BY u.display_name COLLATE NOCASE, u.email COLLATE NOCASE
        LIMIT 250`,
@@ -396,6 +508,14 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
       `UPDATE orders SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP
        WHERE id IN (SELECT order_id FROM payment_batch_orders WHERE payment_batch_id = ?) AND status = 'submitted'`,
     ).bind(payment.id));
+    if (body.status === "approved") statements.push(
+      env.DB.prepare("INSERT INTO notifications (id, user_id, channel, template_key) VALUES (?, ?, 'in_app', 'payment_approved')")
+        .bind(crypto.randomUUID(), payment.guardian_user_id),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, channel, template_key, payload_json) VALUES (?, ?, 'email', 'payment_approved', ?)")
+        .bind(crypto.randomUUID(), payment.guardian_user_id, JSON.stringify({ paymentBatchId: payment.id })),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, channel, template_key, payload_json) VALUES (?, ?, 'push', 'payment_approved', ?)")
+        .bind(crypto.randomUUID(), payment.guardian_user_id, JSON.stringify({ paymentBatchId: payment.id })),
+    );
     await env.DB.batch(statements);
     return cmsJson({ ok: true, status: body.status });
   }
@@ -403,7 +523,9 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
   if (request.method === "GET" && url.pathname === "/api/demo/admin/support") {
     const requests = await env.DB.prepare(
       `SELECT sr.*, u.display_name, o.order_number FROM support_requests sr JOIN app_users u ON u.id = sr.user_id
-       LEFT JOIN orders o ON o.id = sr.order_id ORDER BY CASE sr.status WHEN 'open' THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 100`,
+       LEFT JOIN orders o ON o.id = sr.order_id
+       WHERE sr.user_id != 'user_demo_family'
+       ORDER BY CASE sr.status WHEN 'open' THEN 0 ELSE 1 END, sr.created_at DESC LIMIT 100`,
     ).all();
     return cmsJson({ requests: requests.results });
   }

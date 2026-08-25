@@ -6,11 +6,12 @@ import Image from "next/image";
 
 type Surface = "family" | "admin" | "kitchen";
 type Language = "es" | "en";
-type Category = "Todos" | "Menú" | "Menú del día";
+type Category = "Todos" | "Menú fijo" | "Menú del día";
 type ServiceType = "breakfast" | "lunch";
 type PaymentMethod = "bank_transfer" | "card";
 type KdsStage = "Nuevas" | "Preparando" | "Listas" | "Empacadas";
 type FamilyDataState = "loading" | "demo" | "live" | "error";
+type PushState = "loading" | "available" | "active" | "denied" | "unsupported" | "unconfigured";
 
 type ServiceDate = {
   id: string;
@@ -28,6 +29,7 @@ type Dish = {
   price: number;
   prepTimeMinutes?: number;
   badge?: string;
+  salesBadges?: string[];
   emoji: string;
   tone: string;
   imageUrl?: string;
@@ -132,6 +134,8 @@ type CreatedOrder = {
 };
 
 type BankTransferConfig = {
+  id: string;
+  label: string;
   bankName: string;
   accountHolder: string;
   accountNumber: string;
@@ -148,9 +152,21 @@ type Availability = {
 };
 
 type PaymentIssue = { id: string; checkout_number: string; expected_cents: number; received_cents: number; difference_cents: number; status: string };
+type AppNotification = { id: string; order_id: string | null; template_key: string; status: string; created_at: string };
 type AuthenticatedUser = { id: string; email: string; display_name: string; locale: string };
-type AdminSection = "overview" | "payments" | "menu" | "customers" | "support" | "settings";
+type AdminSection = "overview" | "analytics" | "payments" | "menu" | "customers" | "support" | "settings";
 type AdminCustomer = { id: string; display_name: string; email: string; status: string; credit_balance_cents: number };
+type AdminAnalytics = {
+  range: { startDate: string; endDate: string };
+  summary: {
+    payment_count: number; approved_payment_count: number; approved_order_count: number;
+    sales_cents: number; cash_collected_cents: number; credit_used_cents: number; pending_cents: number;
+  };
+  topDishes: Array<{ label: string; quantity: number; revenue_cents: number }>;
+  topGrades: Array<{ label: string | null; orders: number; revenue_cents: number }>;
+  weekdays: Array<{ label: string; orders: number; revenue_cents: number; weekday_number: number }>;
+  daily: Array<{ date: string; sales_cents: number; approved_payments: number }>;
+};
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -159,6 +175,12 @@ interface InstallPromptEvent extends Event {
 
 function isClientRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+  const padded = value + "=".repeat((4 - value.length % 4) % 4);
+  const binary = window.atob(padded.replaceAll("-", "+").replaceAll("_", "/"));
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
 type IconName = "meal" | "bank" | "card" | "clock" | "alert" | "check" | "calendar" | "bag" | "help" | "user" | "home" | "orders";
@@ -323,7 +345,7 @@ const dishes: Dish[] = [
     id: "dish_p01", name: "Chilaquiles", nameEn: "Chilaquiles",
     description: "Chilaquiles con carne y salsa a elección; incluyen quesillo, crema y queso.",
     descriptionEn: "Chilaquiles with your choice of meat and salsa, topped with quesillo, cream and cheese.",
-    category: "Menú", price: 20600, emoji: "meal", tone: "avocado", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Huevo", "Soya"],
+    category: "Menú fijo", price: 20600, emoji: "meal", tone: "avocado", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Huevo", "Soya"],
     optionGroups: [
       { id: "group_p01_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
         { id: "opt_p01_child", name: "Niño", nameEn: "Child", priceDeltaCents: 0 },
@@ -343,7 +365,7 @@ const dishes: Dish[] = [
     id: "dish_p02", name: "Sopa teposteca", nameEn: "Teposteca soup",
     description: "Deliciosa sopa de tortilla con pollo acompañada de queso, aguacate y crema.",
     descriptionEn: "Tortilla soup with chicken, cheese, avocado and cream.",
-    category: "Menú", price: 19000, emoji: "meal", tone: "berry", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
+    category: "Menú fijo", price: 19000, emoji: "meal", tone: "berry", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
     optionGroups: [{ id: "group_p02_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
       { id: "opt_p02_child", name: "Niño", nameEn: "Child" },
       { id: "opt_p02_adult", name: "Adulto", nameEn: "Adult", priceDeltaCents: 3000 },
@@ -353,7 +375,7 @@ const dishes: Dish[] = [
     id: "dish_p03", name: "Tacos de birria", nameEn: "Birria tacos",
     description: "Tres tacos acompañados con salsa de birria, cebolla y cilantro.",
     descriptionEn: "Three tacos served with birria sauce, onion and cilantro.",
-    category: "Menú", price: 19500, emoji: "meal", tone: "terracotta", possibleAllergens: ["Gluten", "Lácteos", "Soya"],
+    category: "Menú fijo", price: 19500, emoji: "meal", tone: "terracotta", possibleAllergens: ["Gluten", "Lácteos", "Soya"],
     optionGroups: [{ id: "group_p03_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
       { id: "opt_p03_child", name: "Niño", nameEn: "Child" },
       { id: "opt_p03_adult", name: "Adulto", nameEn: "Adult", priceDeltaCents: 3300 },
@@ -363,7 +385,7 @@ const dishes: Dish[] = [
     id: "dish_p04", name: "Tacos de queso birria", nameEn: "Cheese birria tacos",
     description: "Tres tacos de birria con queso acompañados con salsa de birria, cebolla y cilantro.",
     descriptionEn: "Three cheese birria tacos served with birria sauce, onion and cilantro.",
-    category: "Menú", price: 21000, emoji: "meal", tone: "hibiscus", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
+    category: "Menú fijo", price: 21000, emoji: "meal", tone: "hibiscus", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
     optionGroups: [{ id: "group_p04_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
       { id: "opt_p04_child", name: "Niño", nameEn: "Child" },
       { id: "opt_p04_adult", name: "Adulto", nameEn: "Adult", priceDeltaCents: 2500 },
@@ -373,7 +395,7 @@ const dishes: Dish[] = [
     id: "dish_p05", name: "Tacos flautas", nameEn: "Flauta tacos",
     description: "Flautas de pollo con lechuga, salsa verde, queso y crema; tres para Niño y cuatro para Adulto.",
     descriptionEn: "Chicken flautas with lettuce, green salsa, cheese and cream; three child-size or four adult-size.",
-    category: "Menú", price: 19000, emoji: "meal", tone: "gold", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
+    category: "Menú fijo", price: 19000, emoji: "meal", tone: "gold", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
     optionGroups: [{ id: "group_p05_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
       { id: "opt_p05_child", name: "Niño · 3 tacos", nameEn: "Child · 3 tacos" },
       { id: "opt_p05_adult", name: "Adulto · 4 tacos", nameEn: "Adult · 4 tacos", priceDeltaCents: 3000 },
@@ -382,7 +404,7 @@ const dishes: Dish[] = [
   {
     id: "dish_p06", name: "Deditos de pollo", nameEn: "Chicken fingers",
     description: "Deditos de pollo con papas fritas.", descriptionEn: "Chicken fingers with french fries.",
-    category: "Menú", price: 19000, emoji: "meal", tone: "sunset", possibleAllergens: ["Gluten", "Huevo", "Lácteos", "Soya"],
+    category: "Menú fijo", price: 19000, emoji: "meal", tone: "sunset", possibleAllergens: ["Gluten", "Huevo", "Lácteos", "Soya"],
     optionGroups: [{ id: "group_p06_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
       { id: "opt_p06_child", name: "Niño", nameEn: "Child" },
       { id: "opt_p06_adult", name: "Adulto", nameEn: "Adult", priceDeltaCents: 3000 },
@@ -392,7 +414,7 @@ const dishes: Dish[] = [
     id: "dish_p07", name: "Sándwich a la parrilla", nameEn: "Grilled cheese sandwich",
     description: "Delicioso sándwich a la parrilla con queso cheddar y mozzarella.",
     descriptionEn: "Grilled sandwich with cheddar and mozzarella cheese.",
-    category: "Menú", price: 17000, emoji: "meal", tone: "avocado", allergens: ["Gluten", "Lácteos"], possibleAllergens: ["Huevo", "Soya"],
+    category: "Menú fijo", price: 17000, emoji: "meal", tone: "avocado", allergens: ["Gluten", "Lácteos"], possibleAllergens: ["Huevo", "Soya"],
     optionGroups: [{ id: "group_p07_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
       { id: "opt_p07_child", name: "Niño", nameEn: "Child" },
       { id: "opt_p07_adult", name: "Adulto", nameEn: "Adult", priceDeltaCents: 2500 },
@@ -402,7 +424,7 @@ const dishes: Dish[] = [
     id: "dish_p08", name: "Tacos mexicanos", nameEn: "Mexican tacos",
     description: "Tres tacos con carne a elección, cebolla, cilantro, limón, salsa de la casa y chismol.",
     descriptionEn: "Three tacos with your choice of meat, onion, cilantro, lime, house salsa and chismol.",
-    category: "Menú", price: 19000, emoji: "meal", tone: "terracotta", possibleAllergens: ["Gluten", "Lácteos", "Soya"],
+    category: "Menú fijo", price: 19000, emoji: "meal", tone: "terracotta", possibleAllergens: ["Gluten", "Lácteos", "Soya"],
     optionGroups: [
       { id: "group_p08_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
         { id: "opt_p08_child", name: "Niño · una tortilla", nameEn: "Child · single tortilla" },
@@ -422,7 +444,7 @@ const dishes: Dish[] = [
     id: "dish_p09", name: "Gringas", nameEn: "Gringas",
     description: "Dos tortillas de harina rellenas de queso y carne a elección; acompañadas con guacamole.",
     descriptionEn: "Two flour tortillas filled with cheese and your choice of meat, served with guacamole.",
-    category: "Menú", price: 19000, emoji: "meal", tone: "hibiscus", allergens: ["Gluten", "Lácteos"], possibleAllergens: ["Soya", "Crustáceos al escoger camarón"],
+    category: "Menú fijo", price: 19000, emoji: "meal", tone: "hibiscus", allergens: ["Gluten", "Lácteos"], possibleAllergens: ["Soya", "Crustáceos al escoger camarón"],
     optionGroups: [
       { id: "group_p09_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
         { id: "opt_p09_child", name: "Niño", nameEn: "Child" },
@@ -441,7 +463,7 @@ const dishes: Dish[] = [
     id: "dish_p10", name: "Nachos", nameEn: "Nachos",
     description: "Totopos con frijoles refritos, pico de gallo, jalapeños, guacamole, quesillo y queso cheddar.",
     descriptionEn: "Tortilla chips with refried beans, pico de gallo, jalapeños, guacamole, quesillo and cheddar.",
-    category: "Menú", price: 19000, emoji: "meal", tone: "gold", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
+    category: "Menú fijo", price: 19000, emoji: "meal", tone: "gold", allergens: ["Lácteos"], possibleAllergens: ["Gluten", "Soya"],
     optionGroups: [
       { id: "group_p10_size", name: "Elige el tamaño", nameEn: "Choose a size", required: true, options: [
         { id: "opt_p10_child", name: "Niño", nameEn: "Child" },
@@ -503,59 +525,7 @@ const dishes: Dish[] = [
   },
 ];
 
-const initialKdsOrders: KdsOrder[] = [
-  {
-    id: "L-1048",
-    student: "Sofía M.",
-    classroom: "3° B · Aula 12",
-    dish: "Chilaquiles · Salsa verde · Pollo",
-    time: "11:30",
-    stage: "Nuevas",
-    targetMinutes: 15,
-    printJobsQueued: 0,
-  },
-  {
-    id: "L-1049",
-    student: "Daniela R.",
-    classroom: "2° A · Aula 7",
-    dish: "Tacos · Cochinita pibil",
-    time: "11:30",
-    stage: "Nuevas",
-    allergy: "Sin lácteos",
-    targetMinutes: 15,
-    printJobsQueued: 0,
-  },
-  {
-    id: "L-1044",
-    student: "Mateo M.",
-    classroom: "Kinder A · Norte",
-    dish: "Gringas · Pollo",
-    time: "11:30",
-    stage: "Preparando",
-    targetMinutes: 15,
-    printJobsQueued: 0,
-  },
-  {
-    id: "L-1041",
-    student: "Valentina P.",
-    classroom: "4° C · Aula 18",
-    dish: "Tacos Birria · Con queso",
-    time: "11:30",
-    stage: "Listas",
-    targetMinutes: 15,
-    printJobsQueued: 0,
-  },
-  {
-    id: "L-1038",
-    student: "Lucas A.",
-    classroom: "1° B · Aula 4",
-    dish: "Nachos · Res",
-    time: "11:30",
-    stage: "Empacadas",
-    targetMinutes: 15,
-    printJobsQueued: 1,
-  },
-];
+const initialKdsOrders: KdsOrder[] = [];
 
 const APP_TIME_ZONE = "America/Tegucigalpa";
 
@@ -704,12 +674,15 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const [supportOpen, setSupportOpen] = useState(false);
   const [adminDish, setAdminDish] = useState<Dish | "new" | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
-  const [bankTransfer, setBankTransfer] = useState<BankTransferConfig>({
+  const [bankAccounts, setBankAccounts] = useState<BankTransferConfig[]>([{
+    id: "bank_default",
+    label: "BAC Credomatic",
     bankName: "BAC Credomatic",
     accountHolder: "CHM SA",
     accountNumber: "Pendiente de configurar",
     accountType: "Cuenta por configurar",
-  });
+  }]);
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState("bank_default");
   const [toast, setToast] = useState<string | null>(null);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [kdsOrders, setKdsOrders] = useState(initialKdsOrders);
@@ -717,6 +690,8 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const [paymentIssues, setPaymentIssues] = useState<PaymentIssue[]>([]);
   const [applyCredit, setApplyCredit] = useState(false);
   const [authenticatedUser, setAuthenticatedUser] = useState<AuthenticatedUser | null>(null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [pushState, setPushState] = useState<PushState>("loading");
   const [familyDataState, setFamilyDataState] = useState<FamilyDataState>(surface === "family" ? "loading" : "demo");
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftReady = useRef(false);
@@ -740,11 +715,27 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   }, []);
 
   useEffect(() => {
+    if (surface !== "family") return;
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      const unsupportedTimer = window.setTimeout(() => setPushState("unsupported"), 0);
+      return () => window.clearTimeout(unsupportedTimer);
+    }
+    const timer = window.setTimeout(() => void Promise.all([
+      navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription()),
+      fetch("/api/demo/notifications/push-config", { headers: { Accept: "application/json" } }),
+    ]).then(async ([subscription, response]) => {
+      if (!response.ok) { setPushState("unconfigured"); return; }
+      const config = await response.json() as { enabled?: boolean };
+      setPushState(!config.enabled ? "unconfigured" : subscription ? "active" : Notification.permission === "denied" ? "denied" : "available");
+    }).catch(() => setPushState("unconfigured")), 0);
+    return () => window.clearTimeout(timer);
+  }, [surface]);
+
+  useEffect(() => {
     document.documentElement.lang = language === "es" ? "es-HN" : "en-US";
   }, [language]);
 
   useEffect(() => {
-    if (surface !== "family") return;
     void fetch("/api/auth/session", { headers: { Accept: "application/json" } })
       .then((response) => response.ok ? response.json() as Promise<{ authenticated: boolean; user?: AuthenticatedUser }> : null)
       .then((session) => setAuthenticatedUser(session?.authenticated && session.user ? session.user : null))
@@ -793,7 +784,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
 
   const refreshDemoOrders = useCallback(async () => {
     try {
-      const endpoint = surface === "kitchen" ? "/api/demo/kds" : "/api/demo/bootstrap";
+      const endpoint = surface === "kitchen" ? "/api/demo/kds" : surface === "admin" ? "/api/demo/bootstrap?surface=admin" : "/api/demo/bootstrap";
       const response = await fetch(endpoint, { headers: { Accept: "application/json" } });
       if (!response.ok) {
         if (surface === "family") setFamilyDataState("error");
@@ -801,19 +792,23 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
       }
       const payload = await response.json() as {
         demo?: boolean;
+        user?: AuthenticatedUser;
         orders?: DemoOrder[];
         creditBalanceCents?: number;
         paymentIssues?: PaymentIssue[];
+        notifications?: AppNotification[];
         students?: Array<{
           id: string; first_name: string; last_name: string; delivery_notes: string | null;
           grade: string; section: string; classroom_name: string | null; building: string | null;
           guide_teacher: string; allergies: string[];
         }>;
       };
+      if (payload.user) setAuthenticatedUser(payload.user);
       const nextOrders = payload.orders ?? [];
       setDemoOrders(nextOrders);
       if (typeof payload.creditBalanceCents === "number") setCreditBalanceCents(payload.creditBalanceCents);
       if (payload.paymentIssues) setPaymentIssues(payload.paymentIssues);
+      if (payload.notifications) setNotifications(payload.notifications);
       if (surface === "family") {
         const colors = ["#4b70b5", "#4c8f94", "#b63d3a", "#9a5f7d"];
         const mapped = (payload.students ?? []).map((student, index): Student => ({
@@ -853,8 +848,14 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
         ]);
         if (availabilityResponse?.ok) setAvailability(await availabilityResponse.json() as Availability);
         if (configResponse?.ok) {
-          const config = await configResponse.json() as { payments?: { bankTransfer?: BankTransferConfig } };
-          if (config.payments?.bankTransfer) setBankTransfer(config.payments.bankTransfer);
+          const config = await configResponse.json() as { payments?: { bankAccounts?: BankTransferConfig[]; bankTransfer?: BankTransferConfig } };
+          const accounts = config.payments?.bankAccounts?.length
+            ? config.payments.bankAccounts
+            : config.payments?.bankTransfer ? [config.payments.bankTransfer] : [];
+          if (accounts.length) {
+            setBankAccounts(accounts);
+            setSelectedBankAccountId((current) => accounts.some((account) => account.id === current) ? current : accounts[0].id);
+          }
         }
         if (dishResponse.ok) {
           const dishPayload = await dishResponse.json() as { dishes?: unknown[] };
@@ -864,7 +865,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
                 typeof candidate.name_en !== "string" || typeof candidate.description_es !== "string" ||
                 typeof candidate.description_en !== "string" || typeof candidate.price_cents !== "number" ||
                 typeof candidate.category_es !== "string") return null;
-            const category: Dish["category"] = candidate.category_es === "Menú del día" ? "Menú del día" : "Menú";
+            const category: Dish["category"] = candidate.category_es === "Menú del día" ? "Menú del día" : "Menú fijo";
             const groups = Array.isArray(candidate.option_groups)
               ? candidate.option_groups.map((group): OptionGroup | null => {
                 if (!isClientRecord(group) || typeof group.id !== "string" || typeof group.name_es !== "string" ||
@@ -894,6 +895,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
               prepTimeMinutes: typeof candidate.prep_time_minutes === "number" ? candidate.prep_time_minutes : 15,
               emoji: typeof candidate.emoji === "string" ? candidate.emoji : "🍽️",
               badge: typeof candidate.badge_es === "string" ? candidate.badge_es : undefined,
+              salesBadges: Array.isArray(candidate.sales_badges) ? candidate.sales_badges.filter((badge): badge is string => typeof badge === "string") : [],
               tone: tones[index % tones.length],
               imageKey,
               imageUrl: imageKey ? `/api/public/media/${imageKey}` : undefined,
@@ -956,7 +958,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const dishesForSelectedDay = catalogDishes.filter((dish) =>
     dish.category !== "Menú del día" || dish.menuWeekday === undefined || dish.menuWeekday === selectedWeekday);
   const visibleDishes = category === "Todos"
-    ? dishesForSelectedDay
+    ? [...dishesForSelectedDay].sort((left, right) => Number(right.category === "Menú del día") - Number(left.category === "Menú del día"))
     : dishesForSelectedDay.filter((dish) => dish.category === category);
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
   const cartTotal = cart.reduce((total, item) => {
@@ -1008,7 +1010,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
       const creditCents = applyCredit ? Math.min(creditBalanceCents, cartTotal) : 0;
       const batchResponse = await fetch("/api/demo/payment-batches", {
         method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ orderIds: created.map((order) => order.id), requestKey, creditCents }),
+        body: JSON.stringify({ orderIds: created.map((order) => order.id), requestKey, creditCents, bankAccountId: selectedBankAccountId }),
       });
       const batchPayload = await batchResponse.json() as { paymentBatch?: { id: string; checkoutNumber: string; status: string; amountDueCents: number; expiresAt: string }; error?: string };
       if (!batchResponse.ok || !batchPayload.paymentBatch) throw new Error(batchPayload.error ?? "No se pudo agrupar el pago");
@@ -1096,6 +1098,45 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
     showToast(jobType === "package_label" ? "Etiqueta agregada a la cola" : "Comanda agregada a la cola");
   };
 
+  const deliverAllPacked = async () => {
+    if (!window.confirm("¿Confirmar como entregados todos los pedidos empacados? Se notificará a cada cliente.")) return;
+    const response = await fetch("/api/demo/kds/deliver-all", { method: "POST" });
+    const payload = await response.json() as { delivered?: number; error?: string };
+    if (!response.ok) { showToast(payload.error ?? "No se pudo confirmar la entrega"); return; }
+    await refreshDemoOrders();
+    showToast(payload.delivered ? `${payload.delivered} pedidos marcados como entregados` : "No hay pedidos empacados pendientes");
+  };
+
+  const reviewNotifications = async () => {
+    const unread = notifications.filter((item) => item.status !== "read");
+    showToast(unread.length ? `${unread.length} actualización${unread.length === 1 ? "" : "es"} de pedidos y pagos` : "No tienes notificaciones nuevas");
+    if (unread.length) {
+      await fetch("/api/demo/notifications/read-all", { method: "POST" });
+      setNotifications((current) => current.map((item) => ({ ...item, status: "read" })));
+    }
+  };
+
+  const activatePush = async () => {
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { setPushState("denied"); showToast("Debes permitir notificaciones en la configuración del dispositivo"); return; }
+      const response = await fetch("/api/demo/notifications/push-config", { headers: { Accept: "application/json" } });
+      const config = await response.json() as { publicKey?: string | null; error?: string };
+      if (!response.ok || !config.publicKey) throw new Error(config.error ?? "Las notificaciones aún no están configuradas");
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64UrlToBytes(config.publicKey) });
+      const saved = await fetch("/api/demo/notifications/subscribe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(subscription.toJSON()) });
+      if (!saved.ok) throw new Error("No se pudo registrar este dispositivo");
+      setPushState("active"); showToast("Notificaciones activadas en este dispositivo");
+    } catch (error) { showToast(error instanceof Error ? error.message : "No se pudieron activar las notificaciones"); }
+  };
+
+  const testPush = async () => {
+    const response = await fetch("/api/demo/notifications/test", { method: "POST" });
+    const payload = await response.json() as { message?: string; error?: string };
+    showToast(response.ok ? (payload.message ?? "Notificación de prueba programada") : (payload.error ?? "No se pudo enviar la prueba"));
+  };
+
   return (
     <main className={`app-shell ${surface === "family" ? "family-shell" : ""}`}>
       <header className={`topbar ${surface === "family" ? "family-topbar" : ""}`}>
@@ -1108,11 +1149,13 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
         <div className="top-actions">
           {surface === "family" && currentStudent && (
             <nav className="desktop-account-nav" aria-label={language === "es" ? "Cuenta y soporte" : "Account and support"}>
+              <button className="notification-button" onClick={() => void reviewNotifications()}><PipiroIcon name="alert" size={16} />Notificaciones{notifications.some((item) => item.status !== "read") && <i>{notifications.filter((item) => item.status !== "read").length}</i>}</button>
               <button onClick={() => setHistoryOpen(true)}><PipiroIcon name="orders" size={16} />{language === "es" ? "Pedidos" : "Orders"}</button>
               <button onClick={() => setSupportOpen(true)}><PipiroIcon name="help" size={16} />{language === "es" ? "Ayuda" : "Help"}</button>
               <button onClick={() => setProfileStudent(currentStudent)}><PipiroIcon name="user" size={16} />{language === "es" ? "Perfil" : "Profile"}</button>
             </nav>
           )}
+          {surface === "family" && currentStudent && <button className="mobile-notification notification-button" aria-label="Notificaciones" onClick={() => void reviewNotifications()}><PipiroIcon name="alert" size={17} />{notifications.some((item) => item.status !== "read") && <i>{notifications.filter((item) => item.status !== "read").length}</i>}</button>}
           <button className="language-button" onClick={() => setLanguage(language === "es" ? "en" : "es")}> 
             {language === "es" ? "EN" : "ES"}
           </button>
@@ -1160,6 +1203,9 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           openHistory={() => setHistoryOpen(true)}
           openSupport={() => setSupportOpen(true)}
           availability={availability}
+          pushState={pushState}
+          activatePush={activatePush}
+          testPush={testPush}
         />
       )}
 
@@ -1208,10 +1254,11 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           refreshOrders={refreshDemoOrders}
           dishes={catalogDishes}
           editDish={setAdminDish}
+          adminName={authenticatedUser?.display_name ?? "Administrador"}
         />
       )}
       {surface === "kitchen" && (
-        <KitchenView orders={kdsOrders} advanceOrder={advanceOrder} queuePrint={queuePrint} showToast={showToast} />
+        <KitchenView orders={kdsOrders} advanceOrder={advanceOrder} queuePrint={queuePrint} deliverAllPacked={deliverAllPacked} showToast={showToast} />
       )}
 
       {cartOpen && currentStudent && (
@@ -1235,6 +1282,9 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           creditBalanceCents={creditBalanceCents}
           applyCredit={applyCredit}
           setApplyCredit={setApplyCredit}
+          bankAccounts={bankAccounts}
+          selectedBankAccountId={selectedBankAccountId}
+          setSelectedBankAccountId={setSelectedBankAccountId}
         />
       )}
 
@@ -1245,7 +1295,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           total={cartTotal}
           selectedDateLabel={selectedDateLabel}
           order={createdOrder}
-          bankTransfer={bankTransfer}
+          bankTransfer={bankAccounts.find((account) => account.id === selectedBankAccountId) ?? bankAccounts[0]}
           uploaded={refreshDemoOrders}
           close={startAnotherOrder}
         />
@@ -1305,6 +1355,9 @@ type FamilyViewProps = {
   openHistory: () => void;
   openSupport: () => void;
   availability: Availability | null;
+  pushState: PushState;
+  activatePush: () => Promise<void>;
+  testPush: () => Promise<void>;
 };
 
 function FamilyView({
@@ -1331,6 +1384,9 @@ function FamilyView({
   openHistory,
   openSupport,
   availability,
+  pushState,
+  activatePush,
+  testPush,
 }: FamilyViewProps) {
   return (
     <div className="family-page page-content">
@@ -1403,12 +1459,23 @@ function FamilyView({
 
       <section className="schedule-card" aria-labelledby="schedule-title">
         <div className="schedule-icon" aria-hidden="true"><PipiroIcon name="clock" /></div>
-        <div>
-          <p>{t.delivery}</p>
+        <div className="schedule-main">
+          <p>{language === "es" ? "Entrega asignada por la institución" : "Delivery assigned by the school"}</p>
           <h2 id="schedule-title">{t.school}</h2>
-          <span>{language === "es" ? "Almuerzo · 11:30 a. m. · Pide hasta las 11:59 p. m. del día anterior" : "Lunch · 11:30 a.m. · Order by 11:59 p.m. the previous day"}{` · ${currentStudent.detail}`}</span>
+          <div className="schedule-details">
+            <span><strong>{language === "es" ? "Horario" : "Time"}</strong>{language === "es" ? "Almuerzo · 11:30 a. m." : "Lunch · 11:30 a.m."}</span>
+            <span><strong>{language === "es" ? "Destinatario" : "Recipient"}</strong>{currentStudent.name} · {currentStudent.grade} {currentStudent.section}</span>
+            <span><strong>{language === "es" ? "Ubicación" : "Location"}</strong>{currentStudent.classroomName} · {currentStudent.teacher}</span>
+          </div>
+          <small>{language === "es" ? "Pide hasta las 11:59 p. m. del día anterior." : "Order by 11:59 p.m. the previous day."}</small>
         </div>
       </section>
+
+      {(pushState === "available" || pushState === "active" || pushState === "denied") && <section className={`push-opt-in ${pushState === "active" ? "is-active" : ""}`}>
+        <span aria-hidden="true"><PipiroIcon name={pushState === "active" ? "check" : "alert"} /></span>
+        <div><strong>{pushState === "active" ? "Notificaciones activadas" : "Recibe avisos de tus pedidos"}</strong><p>{pushState === "active" ? "Este dispositivo recibirá confirmaciones de pago y entrega." : pushState === "denied" ? "Las notificaciones están bloqueadas en la configuración del dispositivo." : "Te avisaremos cuando aprobemos el pago y cuando el almuerzo sea entregado."}</p></div>
+        {pushState === "active" ? <button onClick={() => void testPush()}>Enviar prueba</button> : pushState === "available" ? <button onClick={() => void activatePush()}>Activar</button> : null}
+      </section>}
 
       <section aria-labelledby="date-title">
         <div className="section-heading compact">
@@ -1446,7 +1513,7 @@ function FamilyView({
         </div>
 
         <div className="category-row" aria-label="Categorías de comida">
-          {(["Todos", "Menú", "Menú del día"] as Category[]).map((item) => (
+          {(["Todos", "Menú del día", "Menú fijo"] as Category[]).map((item) => (
             <button
               key={item}
               className={category === item ? "active" : ""}
@@ -1454,7 +1521,7 @@ function FamilyView({
               aria-pressed={category === item}
             >
               {language === "en"
-                ? { Todos: "All", Menú: "Menu", "Menú del día": "Menu of the day" }[item]
+                ? { Todos: "All", "Menú fijo": "Fixed menu", "Menú del día": "Menu of the day" }[item]
                 : item}
             </button>
           ))}
@@ -1473,6 +1540,7 @@ function FamilyView({
                     ? <Image className="dish-photo" src={dish.imageUrl} alt="" fill sizes="(max-width: 680px) 50vw, 25vw" unoptimized />
                     : <span className="food-emoji" aria-hidden="true"><PipiroIcon name="meal" size={48} /></span>}
                   {dish.badge && <span className="dish-badge">{dish.badge}</span>}
+                  {dish.salesBadges?.map((badge, index) => <span className="dish-badge sales-badge" style={{ top: `${10 + index * 25}px` }} key={badge}>{badge}</span>)}
                   {quantity > 0 && <span className="dish-cart-count">{quantity}</span>}
                 </div>
                 <div className="dish-copy">
@@ -1525,6 +1593,7 @@ function AdminView({
   refreshOrders,
   dishes,
   editDish,
+  adminName,
 }: {
   showToast: (message: string) => void;
   todayLabel: string;
@@ -1532,6 +1601,7 @@ function AdminView({
   refreshOrders: () => Promise<void>;
   dishes: Dish[];
   editDish: (dish: Dish | "new") => void;
+  adminName: string;
 }) {
   const [importRows, setImportRows] = useState<CmsImportRow[]>([]);
   const [importFileName, setImportFileName] = useState("");
@@ -1638,13 +1708,21 @@ function AdminView({
   const pendingTransfers = [...new Map(orders.filter((order) => order.payment_batch_id && ["pending", "under_review", "amount_mismatch"].includes(order.payment_status))
     .map((order) => [order.payment_batch_id, order])).values()];
   const confirmedCount = orders.filter((order) => order.payment_status === "approved").length;
+  const firstName = adminName.trim().split(/\s+/)[0] || "Administrador";
+  const flowRows = [
+    ["Confirmados", orders.filter((order) => ["confirmed", "preparing", "ready", "packed", "out_for_delivery", "delivered"].includes(order.status)).length],
+    ["En cocina", orders.filter((order) => ["preparing", "ready"].includes(order.status)).length],
+    ["Empacados", orders.filter((order) => ["packed", "out_for_delivery", "delivered"].includes(order.status)).length],
+    ["Entregados", orders.filter((order) => order.status === "delivered").length],
+  ] as const;
+  const flowBase = Math.max(1, flowRows[0][1]);
 
   return (
     <div className="ops-page page-content">
       <section className="ops-heading">
         <div>
           <p className="eyebrow">OPERACIÓN · {todayLabel}</p>
-          <h1>Buenos días, Daniela</h1>
+          <h1>Buenos días, {firstName}</h1>
           <p>Todo lo importante para la jornada de hoy.</p>
         </div>
         <button className="primary-action" onClick={() => editDish("new")}>+ Nuevo platillo</button>
@@ -1652,7 +1730,7 @@ function AdminView({
 
       <nav className="admin-section-nav" aria-label="Secciones de administración">
         {([
-          ["overview", "Resumen"], ["payments", "Pagos"], ["menu", "Menú y calendario"],
+          ["overview", "Resumen"], ["analytics", "Ventas"], ["payments", "Pagos"], ["menu", "Menú y calendario"],
           ["customers", "Clientes"], ["support", "Mensajes"], ["settings", "Configuración"],
         ] as Array<[AdminSection, string]>).map(([id, label]) => (
           <button key={id} className={adminSection === id ? "active" : ""} onClick={() => setAdminSection(id)}>{label}</button>
@@ -1660,13 +1738,14 @@ function AdminView({
       </nav>
 
       {adminSection === "overview" && <div className="metric-grid">
-        <MetricCard icon="▤" value={String(orders.length)} label="Pedidos demo" detail="Guardados en D1 local" tone="blue" />
+        <MetricCard icon="▤" value={String(orders.length)} label="Pedidos reales" detail="Clientes registrados en Pipiro" tone="blue" />
         <MetricCard icon="✓" value={String(confirmedCount)} label="Pagos aprobados" detail="Disponibles para cocina" tone="green" />
         <MetricCard icon="○" value={String(orders.filter((order) => ["confirmed", "preparing", "ready"].includes(order.status)).length)} label="En operación" detail="Preparación y empaque" tone="gold" />
         <MetricCard icon="!" value={String(pendingTransfers.length)} label="Transferencias pendientes" detail="Revisar comprobantes" tone="red" />
       </div>}
 
       <div className="ops-grid" data-admin-section={adminSection}>
+        <SalesAnalyticsPanel />
         <PaymentSettingsPanel showToast={showToast} />
         <CreditAdminPanel showToast={showToast} refresh={refreshOrders} />
         <SupportAdminPanel />
@@ -1727,15 +1806,10 @@ function AdminView({
             <button className="text-button">Ver operación →</button>
           </div>
           <div className="flow-summary">
-            {[
-              ["Confirmados", "48", "100%"],
-              ["En cocina", "32", "67%"],
-              ["Empacados", "21", "44%"],
-              ["Entregados", "8", "17%"],
-            ].map(([label, value, width], index) => (
+            {flowRows.map(([label, value], index) => (
               <div className="flow-item" key={label}>
                 <span className="flow-number">{index + 1}</span>
-                <div><strong>{label}</strong><span><i style={{ width }} /> </span></div>
+                <div><strong>{label}</strong><span><i style={{ width: `${Math.round((value / flowBase) * 100)}%` }} /> </span></div>
                 <b>{value}</b>
               </div>
             ))}
@@ -1744,7 +1818,7 @@ function AdminView({
 
         <section className="panel wide-panel transfer-panel">
           <div className="panel-title">
-            <div><span className="panel-icon">L</span><div><h2>Conciliación de transferencias</h2><p>Pedidos creados por clientes de demostración</p></div></div>
+            <div><span className="panel-icon">L</span><div><h2>Conciliación de transferencias</h2><p>Comprobantes enviados por clientes</p></div></div>
             <span className="safe-chip">{pendingTransfers.length} pendientes</span>
           </div>
           <div className="transfer-list">
@@ -1773,25 +1847,107 @@ function AdminView({
   );
 }
 
+function SalesAnalyticsPanel() {
+  const today = formatDateId(new Date());
+  const [startDate, setStartDate] = useState(`${today.slice(0, 8)}01`);
+  const [endDate, setEndDate] = useState(today);
+  const [analytics, setAnalytics] = useState<AdminAnalytics | null>(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/demo/admin/analytics?start=${encodeURIComponent(startDate)}&end=${encodeURIComponent(endDate)}`, {
+        headers: { Accept: "application/json" },
+      });
+      const payload = await response.json() as AdminAnalytics & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "No se pudieron cargar las métricas");
+      setAnalytics(payload);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudieron cargar las métricas");
+    } finally {
+      setBusy(false);
+    }
+  }, [endDate, startDate]);
+
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(initialLoad);
+  }, [load]);
+
+  const summary = analytics?.summary;
+  const approvedPayments = Number(summary?.approved_payment_count ?? 0);
+  const averageTicket = approvedPayments ? Number(summary?.sales_cents ?? 0) / approvedPayments : 0;
+  const maxDish = Math.max(1, ...((analytics?.topDishes ?? []).map((item) => Number(item.quantity))));
+  const maxGrade = Math.max(1, ...((analytics?.topGrades ?? []).map((item) => Number(item.orders))));
+  const maxWeekday = Math.max(1, ...((analytics?.weekdays ?? []).map((item) => Number(item.orders))));
+
+  const ranking = (
+    title: string,
+    subtitle: string,
+    rows: Array<{ label: string; count: number; amount: number }>,
+    maximum: number,
+  ) => (
+    <section className="analytics-ranking">
+      <header><div><h3>{title}</h3><p>{subtitle}</p></div></header>
+      <div className="analytics-bars">
+        {rows.map((row) => <article key={row.label}>
+          <div><strong>{row.label}</strong><span>{row.count} pedidos · {money.format(row.amount / 100)}</span></div>
+          <i><b style={{ width: `${Math.max(4, Math.round((row.count / maximum) * 100))}%` }} /></i>
+        </article>)}
+        {!rows.length && <p className="analytics-empty">Sin ventas aprobadas en este período.</p>}
+      </div>
+    </section>
+  );
+
+  return <section className="panel wide-panel analytics-panel">
+    <div className="panel-title analytics-heading">
+      <div><span className="panel-icon"><PipiroIcon name="orders" /></span><div><h2>Ventas y pagos</h2><p>Información contable básica basada únicamente en pagos aprobados</p></div></div>
+      <div className="analytics-filters">
+        <label><span>Desde</span><input type="date" value={startDate} max={endDate} onChange={(event) => setStartDate(event.target.value)} /></label>
+        <label><span>Hasta</span><input type="date" value={endDate} min={startDate} max={today} onChange={(event) => setEndDate(event.target.value)} /></label>
+        <button onClick={() => void load()} disabled={busy}>{busy ? "Actualizando…" : "Actualizar"}</button>
+      </div>
+    </div>
+    {error && <p className="form-error">{error}</p>}
+    <div className="metric-grid analytics-metrics">
+      <MetricCard icon="L" value={money.format(Number(summary?.sales_cents ?? 0) / 100)} label="Ventas aprobadas" detail={`${Number(summary?.approved_order_count ?? 0)} pedidos · ticket ${money.format(averageTicket / 100)}`} tone="blue" />
+      <MetricCard icon="✓" value={money.format(Number(summary?.cash_collected_cents ?? 0) / 100)} label="Cobrado" detail={`${approvedPayments} pagos conciliados`} tone="green" />
+      <MetricCard icon="C" value={money.format(Number(summary?.credit_used_cents ?? 0) / 100)} label="Crédito utilizado" detail="Saldo aplicado por clientes" tone="gold" />
+      <MetricCard icon="!" value={money.format(Number(summary?.pending_cents ?? 0) / 100)} label="Por conciliar" detail="Pendiente, en revisión o con diferencia" tone="red" />
+    </div>
+    <p className="accounting-note">“Ventas aprobadas” representa ingresos por pedidos conciliados; todavía no descuenta costos de ingredientes, personal, impuestos ni otros gastos, por lo que no equivale a utilidad.</p>
+    <div className="analytics-ranking-grid">
+      {ranking("Platillos más vendidos", "Unidades e ingresos", (analytics?.topDishes ?? []).map((item) => ({ label: item.label, count: Number(item.quantity), amount: Number(item.revenue_cents) })), maxDish)}
+      {ranking("Grados con más pedidos", "Pedidos e ingresos", (analytics?.topGrades ?? []).map((item) => ({ label: item.label || "Sin grado", count: Number(item.orders), amount: Number(item.revenue_cents) })), maxGrade)}
+      {ranking("Días con más ventas", "Según fecha de entrega", (analytics?.weekdays ?? []).map((item) => ({ label: item.label, count: Number(item.orders), amount: Number(item.revenue_cents) })), maxWeekday)}
+    </div>
+  </section>;
+}
+
 function PaymentSettingsPanel({ showToast }: { showToast: (message: string) => void }) {
-  const [values, setValues] = useState({ bankName: "BAC Credomatic", accountHolder: "CHM SA", accountNumber: "Pendiente de configurar", accountType: "Pendiente de configurar" });
+  type AdminBank = { id?: string; label: string; bankName: string; accountHolder: string; accountNumber: string; accountType: string; instructions: string; isActive: boolean };
+  const blank: AdminBank = { label: "", bankName: "", accountHolder: "CHM SA", accountNumber: "", accountType: "", instructions: "", isActive: true };
+  const [accounts, setAccounts] = useState<AdminBank[]>([]);
+  const [values, setValues] = useState<AdminBank>(blank);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { void fetch("/api/demo/admin/payment-settings").then((response) => response.ok ? response.json() as Promise<{ settings?: { bank_name: string; account_holder: string; account_number: string; account_type: string } }> : null).then((payload) => {
-    const settings = payload?.settings;
-    if (settings) setValues({ bankName: settings.bank_name, accountHolder: settings.account_holder, accountNumber: settings.account_number, accountType: settings.account_type });
-  }).catch(() => undefined); }, []);
+  const load = useCallback(async () => { const response = await fetch("/api/demo/admin/payment-settings"); if (!response.ok) return; const payload = await response.json() as { accounts?: Array<{ id: string; label: string; bank_name: string; account_holder: string; account_number: string; account_type: string; instructions: string | null; is_active: number }> }; setAccounts((payload.accounts ?? []).map((account) => ({ id: account.id, label: account.label, bankName: account.bank_name, accountHolder: account.account_holder, accountNumber: account.account_number, accountType: account.account_type, instructions: account.instructions ?? "", isActive: Boolean(account.is_active) }))); }, []);
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   const save = async () => {
     setBusy(true);
     try {
-      const response = await fetch("/api/demo/admin/payment-settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
+      const response = await fetch(values.id ? `/api/demo/admin/payment-settings/${values.id}` : "/api/demo/admin/payment-settings", { method: values.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "No se pudo guardar");
-      showToast("Datos bancarios actualizados");
+      await load(); setValues(blank); showToast("Cuenta bancaria guardada");
     } catch (cause) { showToast(cause instanceof Error ? cause.message : "No se pudo guardar"); } finally { setBusy(false); }
   };
-  return <section className="panel payment-settings-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="bank" /></span><div><h2>Cuenta para transferencias</h2><p>Visible al cliente después de confirmar</p></div></div></div><div className="admin-inline-form">
-    {[['bankName','Banco'],['accountHolder','Titular'],['accountNumber','Número de cuenta'],['accountType','Tipo de cuenta']].map(([key,label]) => <label key={key}><span>{label}</span><input value={values[key as keyof typeof values]} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
-    <button disabled={busy} onClick={() => void save()}>{busy ? "Guardando…" : "Guardar cuenta"}</button></div></section>;
+  return <section className="panel payment-settings-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="bank" /></span><div><h2>Bancos para transferencias</h2><p>El cliente escoge una cuenta y esa selección queda vinculada al pago</p></div></div><button className="secondary-action" onClick={() => setValues(blank)}>Agregar banco</button></div><div className="bank-admin-list">{accounts.map((account) => <button key={account.id} className={!account.isActive ? "inactive" : ""} onClick={() => setValues(account)}><strong>{account.label}</strong><span>{account.bankName} · {account.accountType} · {account.accountNumber}</span><em>{account.isActive ? "Activo" : "Oculto"}</em></button>)}</div><div className="admin-inline-form">
+    {[['label','Nombre visible'],['bankName','Banco'],['accountHolder','Titular'],['accountNumber','Número de cuenta'],['accountType','Tipo de cuenta'],['instructions','Instrucciones opcionales']].map(([key,label]) => <label key={key}><span>{label}</span><input value={String(values[key as keyof AdminBank] ?? "")} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+    {values.id && <label className="admin-checkbox"><input type="checkbox" checked={values.isActive} onChange={(event) => setValues((current) => ({ ...current, isActive: event.target.checked }))} /><span>Cuenta disponible para clientes</span></label>}
+    <button disabled={busy || !values.label || !values.bankName || !values.accountNumber || !values.accountType} onClick={() => void save()}>{busy ? "Guardando…" : values.id ? "Actualizar cuenta" : "Agregar cuenta"}</button></div></section>;
 }
 
 function CreditAdminPanel({ showToast, refresh }: { showToast: (message: string) => void; refresh: () => Promise<void> }) {
@@ -1877,10 +2033,11 @@ function MetricCard({ icon, value, label, detail, tone }: { icon: string; value:
   );
 }
 
-function KitchenView({ orders, advanceOrder, queuePrint, showToast }: {
+function KitchenView({ orders, advanceOrder, queuePrint, deliverAllPacked, showToast }: {
   orders: KdsOrder[];
   advanceOrder: (id: string) => Promise<void>;
   queuePrint: (id: string, jobType: "kitchen_ticket" | "package_label") => Promise<void>;
+  deliverAllPacked: () => Promise<void>;
   showToast: (message: string) => void;
 }) {
   const stages: KdsStage[] = ["Nuevas", "Preparando", "Listas", "Empacadas"];
@@ -1923,6 +2080,7 @@ function KitchenView({ orders, advanceOrder, queuePrint, showToast }: {
           <div className={delayed ? "kds-stat-alert" : ""}><small>Atrasadas</small><strong>{delayed}</strong></div>
           <div><small>Promedio cocina</small><strong>{averagePrep || "—"}{averagePrep ? " min" : ""}</strong></div>
           <div><small>Cola impresión</small><strong>{queuedPrints}</strong></div>
+          <button className="kds-deliver-all" disabled={!orders.some((order) => order.stage === "Empacadas")} onClick={() => void deliverAllPacked()}>Confirmar entregados</button>
           <button title="Resumen agrupado de cantidades por platillo y preparación" onClick={() => showToast("Resumen por platillo y preparación listo para conectar con la impresora")}>Resumen de producción</button>
         </div>
       </section>
@@ -2018,7 +2176,7 @@ function ProductDialog({
           <button className="close-button product-close" onClick={close} aria-label={language === "es" ? "Cerrar producto" : "Close product"}>×</button>
         </div>
         <div className="product-content">
-          <p className="product-kicker">{language === "es" ? dish.category : dish.category === "Menú del día" ? "Menu of the day" : "Menu"}</p>
+          <p className="product-kicker">{language === "es" ? dish.category : dish.category === "Menú del día" ? "Menu of the day" : "Fixed menu"}</p>
           <h2 id="product-title">{language === "es" ? dish.name : dish.nameEn}</h2>
           <p className="product-description">{language === "es" ? dish.description : dish.descriptionEn}</p>
           <strong className="product-price">{dish.optionGroups?.some((group) => group.name === "Elige el tamaño") && (language === "es" ? "Desde " : "From ")}{money.format(dish.price / 100)}</strong>
@@ -2094,6 +2252,9 @@ function CartDialog({
   creditBalanceCents,
   applyCredit,
   setApplyCredit,
+  bankAccounts,
+  selectedBankAccountId,
+  setSelectedBankAccountId,
 }: {
   t: (typeof ui)[Language];
   language: Language;
@@ -2114,6 +2275,9 @@ function CartDialog({
   creditBalanceCents: number;
   applyCredit: boolean;
   setApplyCredit: (value: boolean) => void;
+  bankAccounts: BankTransferConfig[];
+  selectedBankAccountId: string;
+  setSelectedBankAccountId: (id: string) => void;
 }) {
   const [allergiesConfirmed, setAllergiesConfirmed] = useState(false);
   return (
@@ -2180,7 +2344,7 @@ function CartDialog({
           </button>
         </fieldset>
         {paymentMethod === "bank_transfer"
-          ? <div className="no-payment-note"><span>✓</span><p><strong>Transferencia bancaria</strong><br />Al crear el pedido verás la cuenta y podrás subir el comprobante. Cocina lo recibirá después de que Admin lo apruebe.</p></div>
+          ? <div className="bank-choice"><label><span>Banco para la transferencia</span><select value={selectedBankAccountId} onChange={(event) => setSelectedBankAccountId(event.target.value)}>{bankAccounts.map((account) => <option value={account.id} key={account.id}>{account.label} · {account.accountType}</option>)}</select></label><p>Al crear el pedido verás los datos completos y podrás subir un solo comprobante. Cocina lo recibirá después de que Administración lo apruebe.</p></div>
           : <div className="card-coming-note">La tarjeta se habilitará únicamente cuando exista una pasarela real y confirmación segura del pago.</div>}
         <button className="confirm-button" disabled={!allergiesConfirmed || submitting || paymentMethod === "card"} onClick={() => void confirm()}>
           {submitting ? "Creando pedido…" : paymentMethod === "card" ? "Tarjeta próximamente" : t.confirm} <span>→</span>
@@ -2190,7 +2354,7 @@ function CartDialog({
   );
 }
 
-function ConfirmationDialog({ students, total, selectedDateLabel, order, bankTransfer, uploaded, close }: { t: (typeof ui)[Language]; students: Student[]; total: number; selectedDateLabel: string; order: CreatedOrder | null; bankTransfer: BankTransferConfig; uploaded: () => Promise<void>; close: () => void }) {
+function ConfirmationDialog({ students, total, selectedDateLabel, order, bankTransfer, uploaded, close }: { t: (typeof ui)[Language]; students: Student[]; total: number; selectedDateLabel: string; order: CreatedOrder | null; bankTransfer: BankTransferConfig | undefined; uploaded: () => Promise<void>; close: () => void }) {
   const [receiptSubmitted, setReceiptSubmitted] = useState(false);
   return (
     <div className="modal-backdrop success-backdrop">
@@ -2205,12 +2369,12 @@ function ConfirmationDialog({ students, total, selectedDateLabel, order, bankTra
           <div><span>Total a transferir</span><strong>{money.format((order?.totalCents ?? total) / 100)}</strong></div>
           <div className="delivery-code"><span>Referencia Pipiro para escribir en el concepto</span><strong>{order?.orderNumber ?? "DEMO"}</strong></div>
         </div>
-        <div className="bank-instructions">
+        {bankTransfer && <div className="bank-instructions">
           <div><span>Banco</span><strong>{bankTransfer.bankName}</strong></div>
           <div><span>Titular</span><strong>{bankTransfer.accountHolder}</strong></div>
           <div><span>Cuenta</span><strong>{bankTransfer.accountNumber}</strong></div>
           <div><span>Tipo</span><strong>{bankTransfer.accountType}</strong></div>
-        </div>
+        </div>}
         {order && order.paymentStatus !== "approved" && <ReceiptUploader paymentId={order.id} batch onUploaded={async () => { setReceiptSubmitted(true); await uploaded(); }} />}
         <p className="transfer-help">{receiptSubmitted ? "Comprobante enviado. El pedido está en revisión administrativa." : "La referencia Pipiro identifica tu orden; no es el número de operación que genera el banco."}</p>
         <button className="confirm-button" onClick={close}>{receiptSubmitted ? "Listo" : "Subir después desde Mis pedidos"}</button>
@@ -2267,7 +2431,7 @@ function AdminDishDialog({ dish, close, saved }: { dish: Dish | null; close: () 
   const [nameEn, setNameEn] = useState(dish?.nameEn ?? "");
   const [descriptionEs, setDescriptionEs] = useState(dish?.description ?? "");
   const [descriptionEn, setDescriptionEn] = useState(dish?.descriptionEn ?? "");
-  const [categoryId, setCategoryId] = useState(dish?.categoryId ?? (dish?.category === "Menú" ? "cat_permanent" : "cat_special"));
+  const [categoryId, setCategoryId] = useState(dish?.categoryId ?? (dish?.category === "Menú fijo" ? "cat_permanent" : "cat_special"));
   const [priceHnl, setPriceHnl] = useState(dish ? String(dish.price / 100) : "");
   const [prepTimeMinutes, setPrepTimeMinutes] = useState(String(dish?.prepTimeMinutes ?? 15));
   const emoji = dish?.emoji ?? "meal";
@@ -2400,7 +2564,7 @@ function AdminDishDialog({ dish, close, saved }: { dish: Dish | null; close: () 
           <div className="cms-basic-fields">
             <label><span>Nombre en español</span><input value={nameEs} onChange={(event) => setNameEs(event.target.value)} /></label>
             <label><span>Nombre en inglés</span><input value={nameEn} onChange={(event) => setNameEn(event.target.value)} /></label>
-            <label><span>Categoría</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="cat_permanent">Menú</option><option value="cat_special">Menú del día</option></select></label>
+            <label><span>Categoría</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="cat_permanent">Menú fijo</option><option value="cat_special">Menú del día</option></select></label>
             <label><span>Precio en lempiras</span><input inputMode="decimal" value={priceHnl} onChange={(event) => setPriceHnl(event.target.value)} /></label>
             <label><span>Tiempo de cocina</span><div className="input-with-suffix"><input type="number" min="1" max="180" value={prepTimeMinutes} onChange={(event) => setPrepTimeMinutes(event.target.value)} /><small>min</small></div></label>
             <label><span>Etiqueta</span><input value={badgeEs} onChange={(event) => setBadgeEs(event.target.value)} placeholder="Ej.: Nuevo" /></label>
@@ -2532,7 +2696,7 @@ function CalendarManager({ dishes, showToast }: { dishes: Dish[]; showToast: (me
   );
 }
 
-const gradeOptions = ["Nursery", "Prekinder", "Kinder", "1°", "2°", "3°", "4°", "5°", "6°", "7°", "8°", "9°", "10°", "11°"];
+const gradeOptions = ["Nursery", "Prekinder", "Kinder", "1°", "2°", "3°", "4°", "5°", "6°", "7°", "8°", "9°", "10°", "11°", "12°"];
 const sectionOptions = ["A", "B", "C", "D", "E"];
 
 function ProfileDialog({
@@ -2609,7 +2773,7 @@ function ProfileDialog({
           <label><span>Apellido</span><input value={lastName} onChange={(event) => setLastName(event.target.value)} maxLength={80} /></label>
           <label><span>Grado</span><select value={grade} onChange={(event) => setGrade(event.target.value)}>{gradeOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
           <label><span>Sección</span><select value={section} onChange={(event) => setSection(event.target.value)}>{sectionOptions.map((item) => <option key={item}>{item}</option>)}</select></label>
-          <label className="full-field"><span>Indicaciones de entrega</span><input value={deliveryNotes} onChange={(event) => setDeliveryNotes(event.target.value)} maxLength={240} placeholder="Ej.: entregar en recepción" /></label>
+          <label className="full-field"><span>Entrega asignada por la institución</span><input value={deliveryNotes} onChange={(event) => setDeliveryNotes(event.target.value)} maxLength={240} placeholder="Ej.: aula, edificio o punto indicado por la institución" /></label>
           <label className="full-field allergy-field"><span>Alergias</span><textarea value={allergies} onChange={(event) => setAllergies(event.target.value)} maxLength={400} placeholder="Separar con comas; dejar vacío si no tiene" /><small>Esta información se adjunta automáticamente a cada pedido.</small></label>
         </div>
         <label className="allergy-confirmation">

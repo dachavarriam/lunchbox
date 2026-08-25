@@ -3,6 +3,7 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { handleCmsApi, handlePublicMedia } from "./cms";
 import { authorizeRequest, authorizeSurface, handleAuthApi, requestSurface } from "./auth";
+import { processPushOutbox, validPushSubscription } from "./push";
 
 const jsonHeaders = {
   "Cache-Control": "no-store",
@@ -134,7 +135,7 @@ function parseStudent(value: unknown): StudentInput | null {
   const firstName = value.firstName.trim();
   const lastName = value.lastName.trim();
   const deliveryNotes = value.deliveryNotes.trim();
-  const allowedGrades = new Set(["Nursery", "Prekinder", "Kinder", "1°", "2°", "3°", "4°", "5°", "6°", "7°", "8°", "9°", "10°", "11°"]);
+  const allowedGrades = new Set(["Nursery", "Prekinder", "Kinder", "1°", "2°", "3°", "4°", "5°", "6°", "7°", "8°", "9°", "10°", "11°", "12°"]);
   if (firstName.length < 1 || firstName.length > 80 || lastName.length < 1 || lastName.length > 80 ||
       !allowedGrades.has(value.grade) || !["A", "B", "C", "D", "E"].includes(value.section) ||
       deliveryNotes.length > 240 || value.allergies.length > 10) return null;
@@ -232,7 +233,7 @@ async function expireUnpaidBatches(env: Env): Promise<void> {
   }
 }
 
-async function loadDemoOrders(env: Env, actorUserId: string | null): Promise<DemoOrderRow[]> {
+async function loadDemoOrders(env: Env, actorUserId: string | null, excludeDemoActor = false): Promise<DemoOrderRow[]> {
   await expireUnpaidBatches(env);
   const result = await env.DB.prepare(
     `SELECT o.id, o.order_number, o.status, o.total_cents, o.created_at,
@@ -266,10 +267,11 @@ async function loadDemoOrders(env: Env, actorUserId: string | null): Promise<Dem
      LEFT JOIN payment_batch_orders pbo ON pbo.order_id = o.id
      LEFT JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
      WHERE (? IS NULL OR o.guardian_user_id = ?)
+       AND (? = 0 OR o.guardian_user_id != 'user_demo_family')
      GROUP BY o.id
      ORDER BY o.created_at DESC
      LIMIT 100`,
-  ).bind(actorUserId, actorUserId).all<DemoOrderRow>();
+  ).bind(actorUserId, actorUserId, excludeDemoActor ? 1 : 0).all<DemoOrderRow>();
   return result.results;
 }
 
@@ -278,8 +280,9 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   const disabled = assertDemoMode(env);
   if (disabled) return disabled;
 
-  const kitchenRequest = url.pathname === "/api/demo/kds" || /^\/api\/demo\/orders\/[^/]+\/(status|print)$/.test(url.pathname);
-  const adminBootstrapRequest = url.pathname === "/api/demo/bootstrap" && requestSurface(url, env) === "admin";
+  const kitchenRequest = url.pathname === "/api/demo/kds" || url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/orders\/[^/]+\/(status|print)$/.test(url.pathname);
+  const adminBootstrapRequest = url.pathname === "/api/demo/bootstrap" &&
+    (requestSurface(url, env) === "admin" || (requestSurface(url, env) === null && url.searchParams.get("surface") === "admin"));
   const authorization = await authorizeRequest(
     request,
     env,
@@ -291,7 +294,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   const actorUserId = authorization.actor.userId;
 
   if (request.method === "GET" && url.pathname === "/api/demo/bootstrap") {
-    const [user, studentResult, orders, credit, issues, support] = await Promise.all([
+    const [user, studentResult, orders, credit, issues, support, notifications] = await Promise.all([
       env.DB.prepare("SELECT id, display_name, email, locale FROM app_users WHERE id = ? LIMIT 1")
         .bind(actorUserId).first(),
       env.DB.prepare(
@@ -305,7 +308,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
          GROUP BY s.id
          ORDER BY s.created_at`,
       ).bind(actorUserId).all<StudentRow>(),
-      loadDemoOrders(env, adminBootstrapRequest ? null : actorUserId),
+      loadDemoOrders(env, adminBootstrapRequest ? null : actorUserId, adminBootstrapRequest),
       env.DB.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS balance_cents FROM credit_ledger WHERE user_id = ?")
         .bind(actorUserId).first<{ balance_cents: number }>(),
       env.DB.prepare(
@@ -315,6 +318,8 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
       env.DB.prepare(
         "SELECT id, order_id, category, subject, message, status, created_at FROM support_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 30",
       ).bind(actorUserId).all(),
+      env.DB.prepare("SELECT id, order_id, template_key, status, created_at FROM notifications WHERE user_id = ? AND channel = 'in_app' ORDER BY created_at DESC LIMIT 30")
+        .bind(actorUserId).all(),
     ]);
     return json({
       demo: authorization.actor.demo,
@@ -327,13 +332,56 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
       creditBalanceCents: credit?.balance_cents ?? 0,
       paymentIssues: issues.results,
       supportRequests: support.results,
+      notifications: notifications.results,
     });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/demo/notifications/read-all") {
+    await env.DB.prepare("UPDATE notifications SET status = 'read' WHERE user_id = ? AND channel = 'in_app' AND status != 'read'")
+      .bind(actorUserId).run();
+    return json({ ok: true });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/demo/notifications/push-config") {
+    const active = await env.DB.prepare("SELECT COUNT(*) AS count FROM push_subscriptions WHERE user_id = ? AND is_active = 1")
+      .bind(actorUserId).first<{ count: number }>();
+    return json({ enabled: Boolean(env.VAPID_PUBLIC_KEY), publicKey: env.VAPID_PUBLIC_KEY || null, activeDevices: Number(active?.count ?? 0) });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/demo/notifications/subscribe") {
+    const body = await readBoundedJson(request);
+    if (!validPushSubscription(body)) return json({ error: "Suscripción push inválida" }, { status: 400 });
+    const id = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO push_subscriptions (id, user_id, endpoint, p256dh, auth, expiration_time, user_agent)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth,
+       expiration_time = excluded.expiration_time, user_agent = excluded.user_agent, is_active = 1, updated_at = CURRENT_TIMESTAMP`,
+    ).bind(id, actorUserId, body.endpoint, body.keys.p256dh, body.keys.auth, body.expirationTime,
+      (request.headers.get("user-agent") ?? "").slice(0, 300) || null).run();
+    return json({ ok: true }, { status: 201 });
+  }
+
+  if (request.method === "DELETE" && url.pathname === "/api/demo/notifications/subscribe") {
+    const body = await readBoundedJson(request);
+    if (!isRecord(body) || typeof body.endpoint !== "string") return json({ error: "Suscripción inválida" }, { status: 400 });
+    await env.DB.prepare("UPDATE push_subscriptions SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND endpoint = ?")
+      .bind(actorUserId, body.endpoint).run();
+    return json({ ok: true });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/demo/notifications/test") {
+    await env.DB.prepare(
+      "INSERT INTO notification_outbox (id, user_id, channel, template_key) VALUES (?, ?, 'push', 'push_test')",
+    ).bind(crypto.randomUUID(), actorUserId).run();
+    return json({ ok: true, message: "La notificación de prueba se enviará en menos de un minuto" }, { status: 202 });
   }
 
   if (request.method === "POST" && url.pathname === "/api/demo/payment-batches") {
     const body = await readBoundedJson(request);
     if (!isRecord(body) || !Array.isArray(body.orderIds) || body.orderIds.length < 1 || body.orderIds.length > 10 ||
         body.orderIds.some((id) => typeof id !== "string") || typeof body.requestKey !== "string" || body.requestKey.length < 8 ||
+        typeof body.bankAccountId !== "string" ||
         typeof body.creditCents !== "number" || !Number.isInteger(body.creditCents) || body.creditCents < 0) {
       return json({ error: "Checkout inválido" }, { status: 400 });
     }
@@ -362,6 +410,9 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
     ).bind(...uniqueOrderIds).all();
     if (existingLinks.results.length) return json({ error: "Uno de los pedidos ya pertenece a otro pago" }, { status: 409 });
     const subtotal = orderResult.results.reduce((sum, order) => sum + order.total_cents, 0);
+    const bankAccount = await env.DB.prepare("SELECT id FROM bank_accounts WHERE id = ? AND is_active = 1 LIMIT 1")
+      .bind(body.bankAccountId).first<{ id: string }>();
+    if (!bankAccount) return json({ error: "Selecciona una cuenta bancaria disponible" }, { status: 409 });
     const balance = await env.DB.prepare("SELECT COALESCE(SUM(amount_cents), 0) AS value FROM credit_ledger WHERE user_id = ?")
       .bind(actorUserId).first<{ value: number }>();
     const creditApplied = Math.min(body.creditCents, balance?.value ?? 0, subtotal);
@@ -375,11 +426,11 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO payment_batches (id, checkout_number, guardian_user_id, payment_method, status, subtotal_cents,
-          credit_applied_cents, amount_due_cents, expires_at, reviewed_at, review_note)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'approved' THEN CURRENT_TIMESTAMP ELSE NULL END,
+          credit_applied_cents, amount_due_cents, expires_at, bank_account_id, reviewed_at, review_note)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'approved' THEN CURRENT_TIMESTAMP ELSE NULL END,
           CASE WHEN ? = 'approved' THEN 'Pagado con crédito Pipiro' ELSE NULL END)`,
       ).bind(batchId, checkoutNumber, actorUserId, amountDue === 0 ? "credit" : creditApplied ? "credit_transfer" : "bank_transfer",
-        status, subtotal, creditApplied, amountDue, expiresAt, status, status),
+        status, subtotal, creditApplied, amountDue, expiresAt, bankAccount.id, status, status),
       ...uniqueOrderIds.map((orderId) => env.DB.prepare(
         "INSERT INTO payment_batch_orders (payment_batch_id, order_id) VALUES (?, ?)",
       ).bind(batchId, orderId)),
@@ -715,6 +766,16 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
       `INSERT INTO support_requests (id, user_id, order_id, category, subject, message)
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).bind(id, actorUserId, body.orderId ?? null, body.category, body.subject.trim(), body.message.trim()).run();
+    const admins = await env.DB.prepare(
+      `SELECT DISTINCT u.id, u.email FROM app_users u JOIN user_roles ur ON ur.user_id = u.id
+       WHERE ur.role = 'admin' AND u.status = 'active'`,
+    ).all<{ id: string; email: string }>();
+    if (admins.results.length) await env.DB.batch(admins.results.flatMap((admin) => [
+      env.DB.prepare("INSERT INTO notifications (id, user_id, order_id, channel, template_key) VALUES (?, ?, ?, 'in_app', 'support_request_created')")
+        .bind(crypto.randomUUID(), admin.id, body.orderId ?? null),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, ?, ?, 'email', 'support_request_created', ?)")
+        .bind(crypto.randomUUID(), admin.id, body.orderId ?? null, admin.email, JSON.stringify({ supportRequestId: id, subject: body.subject.trim() })),
+    ]));
     return json({ id, status: "open" }, { status: 201 });
   }
 
@@ -817,10 +878,31 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   }
 
   if (request.method === "GET" && url.pathname === "/api/demo/kds") {
-    const orders = await loadDemoOrders(env, null);
+    const orders = await loadDemoOrders(env, null, true);
     return json({
       orders: orders.filter((order) => order.payment_status === "approved" && !["cancelled", "delivered"].includes(order.status)),
     });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/demo/kds/deliver-all") {
+    const rows = await env.DB.prepare(
+      `SELECT o.id, o.guardian_user_id FROM orders o JOIN menu_days md ON md.id = o.menu_day_id
+       JOIN payment_batch_orders pbo ON pbo.order_id = o.id JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
+       WHERE pb.status = 'approved' AND o.status = 'packed' AND md.service_date = (
+         SELECT MIN(md2.service_date) FROM orders o2 JOIN menu_days md2 ON md2.id = o2.menu_day_id
+         JOIN payment_batch_orders pbo2 ON pbo2.order_id = o2.id JOIN payment_batches pb2 ON pb2.id = pbo2.payment_batch_id
+         WHERE pb2.status = 'approved' AND o2.status = 'packed'
+       )`,
+    ).all<{ id: string; guardian_user_id: string }>();
+    if (!rows.results.length) return json({ ok: true, delivered: 0 });
+    await env.DB.batch(rows.results.flatMap((order) => [
+      env.DB.prepare("UPDATE orders SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'packed'").bind(order.id),
+      env.DB.prepare("INSERT INTO order_status_events (id, order_id, from_status, to_status, actor_user_id, note) VALUES (?, ?, 'packed', 'delivered', ?, 'Entrega masiva confirmada por KDS')").bind(crypto.randomUUID(), order.id, actorUserId),
+      env.DB.prepare("INSERT INTO notifications (id, user_id, order_id, channel, template_key) VALUES (?, ?, ?, 'in_app', 'order_delivered')").bind(crypto.randomUUID(), order.guardian_user_id, order.id),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'push', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
+    ]));
+    return json({ ok: true, delivered: rows.results.length });
   }
 
   return json({ error: "Not found" }, { status: 404 });
@@ -835,7 +917,7 @@ async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Re
   }
 
   if (url.pathname === "/api/public/config") {
-    const [school, windows, paymentSettings] = await Promise.all([
+    const [school, windows, paymentSettings, bankAccounts] = await Promise.all([
       env.DB.prepare(
         "SELECT slug, name, short_name, timezone, locale, currency FROM schools WHERE slug = ? AND is_active = 1 LIMIT 1",
       ).bind(env.DEFAULT_SCHOOL_SLUG).first(),
@@ -844,6 +926,9 @@ async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Re
       ).bind(env.DEFAULT_SCHOOL_SLUG).all(),
       env.DB.prepare("SELECT bank_name, account_holder, account_number, account_type FROM payment_settings WHERE id = 'default' LIMIT 1")
         .first<{ bank_name: string; account_holder: string; account_number: string; account_type: string }>(),
+      env.DB.prepare("SELECT id, label, bank_name, account_holder, account_number, account_type, instructions FROM bank_accounts WHERE is_active = 1 ORDER BY sort_order, bank_name").all<{
+        id: string; label: string; bank_name: string; account_holder: string; account_number: string; account_type: string; instructions: string | null;
+      }>(),
     ]);
 
     if (!school) return json({ error: "School configuration not found" }, { status: 404 });
@@ -852,11 +937,16 @@ async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Re
       serviceWindows: windows.results.map((window) => ({ ...window, cutoff_time: "23:59", cutoff_rule: "previous_day" })),
       payments: {
         cardEnabled: false,
+        bankAccounts: bankAccounts.results.map((account) => ({ id: account.id, label: account.label, bankName: account.bank_name,
+          accountHolder: account.account_holder, accountNumber: account.account_number, accountType: account.account_type,
+          instructions: account.instructions })),
         bankTransfer: {
-          bankName: paymentSettings?.bank_name ?? env.BANK_NAME,
-          accountHolder: paymentSettings?.account_holder ?? env.BANK_ACCOUNT_HOLDER,
-          accountNumber: paymentSettings?.account_number ?? env.BANK_ACCOUNT_NUMBER,
-          accountType: paymentSettings?.account_type ?? env.BANK_ACCOUNT_TYPE,
+          id: bankAccounts.results[0]?.id ?? "bank_default",
+          label: bankAccounts.results[0]?.label ?? paymentSettings?.bank_name ?? env.BANK_NAME,
+          bankName: bankAccounts.results[0]?.bank_name ?? paymentSettings?.bank_name ?? env.BANK_NAME,
+          accountHolder: bankAccounts.results[0]?.account_holder ?? paymentSettings?.account_holder ?? env.BANK_ACCOUNT_HOLDER,
+          accountNumber: bankAccounts.results[0]?.account_number ?? paymentSettings?.account_number ?? env.BANK_ACCOUNT_NUMBER,
+          accountType: bankAccounts.results[0]?.account_type ?? paymentSettings?.account_type ?? env.BANK_ACCOUNT_TYPE,
         },
       },
     });
@@ -913,8 +1003,32 @@ async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Re
     }
     const visibleRows = scheduledDishIds === null ? dishResult.results : dishResult.results.filter((dish) =>
       dish.category_slug === "menu-permanente" || scheduledDishIds.has(String(dish.id)));
+    let dailyFavoriteId: string | null = null;
+    let monthlyFavoriteId: string | null = null;
+    if (serviceDate && /^\d{4}-\d{2}-\d{2}$/.test(serviceDate)) {
+      const [dailyFavorite, monthlyFavorite] = await Promise.all([
+        env.DB.prepare(
+          `SELECT oi.dish_id FROM order_items oi JOIN orders o ON o.id = oi.order_id
+           JOIN menu_days md ON md.id = o.menu_day_id JOIN payment_batch_orders pbo ON pbo.order_id = o.id
+           JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
+           WHERE md.service_date = ? AND pb.status = 'approved' AND o.status != 'cancelled'
+           GROUP BY oi.dish_id HAVING SUM(oi.quantity) >= 10 ORDER BY MIN(o.created_at), oi.dish_id LIMIT 1`,
+        ).bind(serviceDate).first<{ dish_id: string }>(),
+        env.DB.prepare(
+          `SELECT oi.dish_id FROM order_items oi JOIN orders o ON o.id = oi.order_id
+           JOIN menu_days md ON md.id = o.menu_day_id JOIN payment_batch_orders pbo ON pbo.order_id = o.id
+           JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
+           WHERE substr(md.service_date, 1, 7) = substr(?, 1, 7) AND pb.status = 'approved' AND o.status != 'cancelled'
+           GROUP BY oi.dish_id HAVING SUM(oi.quantity) >= 50 ORDER BY MIN(o.created_at), oi.dish_id LIMIT 1`,
+        ).bind(serviceDate).first<{ dish_id: string }>(),
+      ]);
+      dailyFavoriteId = dailyFavorite?.dish_id ?? null;
+      monthlyFavoriteId = monthlyFavorite?.dish_id ?? null;
+    }
     const dishes = visibleRows.map((dish) => ({
       ...dish,
+      sales_badges: [String(dish.id) === dailyFavoriteId ? "Favorito del día" : null,
+        String(dish.id) === monthlyFavoriteId ? "Favorito del mes" : null].filter(Boolean),
       option_groups: groupsByDish.get(String(dish.id)) ?? [],
     }));
 
@@ -1042,6 +1156,9 @@ const worker = {
     }
 
     return securePageResponse(await handler.fetch(request, env, ctx));
+  },
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(processPushOutbox(env));
   },
 };
 
