@@ -104,6 +104,10 @@ type DemoOrder = {
   classroom: string;
   dish: string;
   allergies: string | null;
+  special_instructions: string | null;
+  student_delivery_notes: string | null;
+  guardian_name: string;
+  guardian_email: string;
   payment_status: string;
   payment_method: string;
   customer_reference: string | null;
@@ -116,6 +120,11 @@ type DemoOrder = {
   bank_account_id: string | null;
   bank_label: string | null;
   bank_name: string | null;
+  receipt_requested_at: string | null;
+  receipt_request_count: number;
+  last_reminder_at: string | null;
+  payment_review_note: string | null;
+  payment_cancellation_reason: string | null;
   created_at: string;
   prep_time_minutes: number;
   stage_started_at: string;
@@ -1709,10 +1718,14 @@ function AdminView({
     try {
       const received = status === "amount_mismatch" ? window.prompt("Monto recibido en lempiras") : null;
       if (status === "amount_mismatch" && (received === null || !Number.isFinite(Number(received)))) return;
+      const reviewNote = status === "rejected"
+        ? window.prompt("Motivo del rechazo (el cliente recibirá esta información)")
+        : status === "amount_mismatch" ? "El monto recibido no coincide con el total del pedido" : "";
+      if (status === "rejected" && (!reviewNote || reviewNote.trim().length < 5)) return;
       const response = await fetch(`/api/demo/admin/payment-batches/${paymentId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status, ...(received !== null ? { receivedCents: Math.round(Number(received) * 100) } : {}) }),
+        body: JSON.stringify({ status, reviewNote, ...(received !== null ? { receivedCents: Math.round(Number(received) * 100) } : {}) }),
       });
       const payload = await response.json() as { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "No se pudo conciliar la transferencia");
@@ -1725,8 +1738,39 @@ function AdminView({
     }
   };
 
-  const pendingTransfers = [...new Map(orders.filter((order) => order.payment_batch_id && ["pending", "under_review", "amount_mismatch"].includes(order.payment_status))
-    .map((order) => [order.payment_batch_id, order])).values()];
+  const paymentAction = async (paymentId: string, action: "request_receipt" | "remind_receipt" | "cancel") => {
+    const reason = action === "cancel"
+      ? window.prompt("Motivo de la cancelación (se notificará al cliente)")
+      : null;
+    if (action === "cancel" && (!reason || reason.trim().length < 5)) return;
+    if (action === "cancel" && !window.confirm("Se cancelarán todas las órdenes incluidas en este pago. ¿Deseas continuar?")) return;
+    setReviewingOrderId(paymentId);
+    try {
+      const response = await fetch(`/api/demo/admin/payment-batches/${paymentId}/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, reason }),
+      });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "No se pudo completar la acción");
+      await refreshOrders();
+      showToast(action === "cancel" ? "Pedido cancelado y cliente notificado" : action === "request_receipt" ? "Solicitud de comprobante enviada" : "Recordatorio enviado");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "No se pudo completar la acción");
+    } finally {
+      setReviewingOrderId(null);
+    }
+  };
+
+  const transferGroupMap = new Map<string, DemoOrder[]>();
+  for (const order of orders) {
+    if (!order.payment_batch_id || !["pending", "under_review", "rejected", "amount_mismatch"].includes(order.payment_status)) continue;
+    const group = transferGroupMap.get(order.payment_batch_id);
+    if (group) group.push(order);
+    else transferGroupMap.set(order.payment_batch_id, [order]);
+  }
+  const transferGroups = [...transferGroupMap.entries()];
+  const pendingTransfers = transferGroups.map(([, batchOrders]) => batchOrders[0]);
   const confirmedCount = orders.filter((order) => order.payment_status === "approved").length;
   const firstName = adminName.trim().split(/\s+/)[0] || "Administrador";
   const flowRows = [
@@ -1842,24 +1886,51 @@ function AdminView({
             <span className="safe-chip">{pendingTransfers.length} pendientes</span>
           </div>
           <div className="transfer-list">
-            {pendingTransfers.map((order) => (
-              <article className="transfer-row" key={order.id}>
-                <div>
-                  <strong>{order.checkout_number ?? order.order_number}</strong>
-                  <span>Pago familiar · {order.service_date} · incluye órdenes separadas por estudiante</span>
-                  <small>Banco seleccionado: {order.bank_label ?? order.bank_name ?? "Sin asignar"}</small>
-                  <small>{order.dish}</small>
-                  <small>{order.receipt_object_key ? `Comprobante: ${order.receipt_original_name ?? "imagen recibida"}` : "Esperando comprobante del cliente"}</small>
-                </div>
-                <b>{money.format(orders.filter((candidate) => candidate.payment_batch_id === order.payment_batch_id).reduce((sum, candidate) => sum + candidate.total_cents, 0) / 100)}</b>
-                <div className="transfer-actions">
-                  {order.receipt_object_key && <a href={`/api/demo/admin/payments/${order.payment_batch_id}/receipt`} target="_blank" rel="noreferrer">Ver comprobante</a>}
-                  <button className="reject-transfer" disabled={reviewingOrderId === order.payment_batch_id} onClick={() => void reviewTransfer(order.payment_batch_id!, "rejected")}>Rechazar</button>
-                  <button disabled={reviewingOrderId === order.payment_batch_id || !order.receipt_object_key} onClick={() => void reviewTransfer(order.payment_batch_id!, "amount_mismatch")}>Monto incorrecto</button>
-                  <button disabled={reviewingOrderId === order.payment_batch_id || !order.receipt_object_key} onClick={() => void reviewTransfer(order.payment_batch_id!, "approved")}>Aprobar</button>
-                </div>
-              </article>
-            ))}
+            {transferGroups.map(([paymentId, batchOrders]) => {
+              const payment = batchOrders[0];
+              const busy = reviewingOrderId === paymentId;
+              const total = batchOrders.reduce((sum, candidate) => sum + candidate.total_cents, 0);
+              const statusLabel = ({ pending: "Esperando comprobante", under_review: "Comprobante en revisión", rejected: "Comprobante rechazado", amount_mismatch: "Monto incorrecto" } as Record<string, string>)[payment.payment_status] ?? payment.payment_status;
+              return (
+                <article className="transfer-row transfer-detail-card" key={paymentId}>
+                  <header className="transfer-summary">
+                    <div><strong>{payment.checkout_number ?? payment.order_number}</strong><span className={`payment-state state-${payment.payment_status}`}>{statusLabel}</span></div>
+                    <b>{money.format(total / 100)}</b>
+                  </header>
+                  <div className="transfer-customer">
+                    <div><small>Comprador</small><strong>{payment.guardian_name}</strong><span>{payment.guardian_email}</span></div>
+                    <div><small>Transferencia</small><strong>{payment.bank_label ?? payment.bank_name ?? "Banco sin asignar"}</strong><span>{payment.customer_reference ? `Referencia bancaria: ${payment.customer_reference}` : "Sin referencia bancaria"}</span></div>
+                    <div><small>Entrega</small><strong>{payment.service_date} · {payment.delivery_time}</strong><span>{batchOrders.length} {batchOrders.length === 1 ? "orden" : "órdenes"} en este pago</span></div>
+                  </div>
+                  <div className="transfer-order-details">
+                    {batchOrders.map((order) => (
+                      <section key={order.id}>
+                        <div><strong>{order.student_name}</strong><span>{order.order_number} · {order.classroom}</span></div>
+                        <p>{order.dish}</p>
+                        {order.allergies && <small><b>Alergias:</b> {order.allergies}</small>}
+                        {order.special_instructions && <small><b>Instrucciones:</b> {order.special_instructions}</small>}
+                        {order.student_delivery_notes && <small><b>Entrega:</b> {order.student_delivery_notes}</small>}
+                        <em>{money.format(order.total_cents / 100)}</em>
+                      </section>
+                    ))}
+                  </div>
+                  <div className="transfer-proof">
+                    <div><strong>{payment.receipt_object_key ? `Comprobante: ${payment.receipt_original_name ?? "imagen recibida"}` : "Comprobante pendiente"}</strong>
+                      <span>{payment.receipt_submitted_at ? `Recibido: ${payment.receipt_submitted_at}` : payment.receipt_requested_at ? `Solicitado ${payment.receipt_request_count} vez${payment.receipt_request_count === 1 ? "" : "es"}` : "Aún no se ha solicitado desde Administración"}</span>
+                    </div>
+                    {payment.receipt_object_key && <a href={`/api/demo/admin/payments/${paymentId}/receipt`} target="_blank" rel="noreferrer">Ver comprobante</a>}
+                  </div>
+                  <div className="transfer-actions">
+                    {!payment.receipt_object_key && <button className="secondary-transfer" disabled={busy} onClick={() => void paymentAction(paymentId, "request_receipt")}>Pedir comprobante</button>}
+                    {!payment.receipt_object_key && <button className="secondary-transfer" disabled={busy} onClick={() => void paymentAction(paymentId, "remind_receipt")}>Enviar recordatorio</button>}
+                    {payment.receipt_object_key && <button className="reject-transfer" disabled={busy} onClick={() => void reviewTransfer(paymentId, "rejected")}>Rechazar comprobante</button>}
+                    {payment.receipt_object_key && <button className="secondary-transfer" disabled={busy} onClick={() => void reviewTransfer(paymentId, "amount_mismatch")}>Monto incorrecto</button>}
+                    {payment.receipt_object_key && <button disabled={busy} onClick={() => void reviewTransfer(paymentId, "approved")}>Aprobar y enviar a cocina</button>}
+                    <button className="cancel-transfer" disabled={busy} onClick={() => void paymentAction(paymentId, "cancel")}>Cancelar pedido</button>
+                  </div>
+                </article>
+              );
+            })}
             {!pendingTransfers.length && <div className="empty-transfer">No hay transferencias pendientes.</div>}
           </div>
         </section>
@@ -2394,7 +2465,7 @@ function CartDialog({
           </button>
         </fieldset>
         {paymentMethod === "bank_transfer"
-          ? <div className="bank-choice"><label><span>Banco para la transferencia</span><select value={selectedBankAccountId} onChange={(event) => setSelectedBankAccountId(event.target.value)}>{bankAccounts.map((account) => <option value={account.id} key={account.id}>{account.label} · {account.accountType}</option>)}</select></label><p>Al crear el pedido verás los datos completos y podrás subir un solo comprobante. Cocina lo recibirá después de que Administración lo apruebe.</p></div>
+          ? <><div className="bank-choice"><label><span>Banco para la transferencia</span><select value={selectedBankAccountId} onChange={(event) => setSelectedBankAccountId(event.target.value)}>{bankAccounts.map((account) => <option value={account.id} key={account.id}>{account.label} · {account.accountType}</option>)}</select></label><p>Al crear el pedido verás los datos completos y podrás subir un solo comprobante.</p></div><div className="payment-proof-warning" role="note"><PipiroIcon name="alert" /><div><strong>El comprobante es indispensable</strong><p>Tu orden quedará pendiente hasta que Administración confirme el pago. Sin el comprobante enviado a tiempo, el pedido no pasa a cocina y no podrá procesarse.</p></div></div></>
           : <div className="card-coming-note">La tarjeta se habilitará únicamente cuando exista una pasarela real y confirmación segura del pago.</div>}
         <button className="confirm-button" disabled={!allergiesConfirmed || submitting || paymentMethod === "card"} onClick={() => void confirm()}>
           {submitting ? "Creando pedido…" : paymentMethod === "card" ? "Tarjeta próximamente" : t.confirm} <span>→</span>
@@ -2412,7 +2483,7 @@ function ConfirmationDialog({ students, total, selectedDateLabel, order, bankTra
         <div className="success-mark"><span>✓</span></div>
         <p className="eyebrow">ORDEN {order?.orderNumber ?? "DEMO"}</p>
         <h2 id="success-title">Pedido creado</h2>
-        <p>Realiza la transferencia y envía el comprobante para que Administración pueda aprobarlo.</p>
+        <p>Realiza la transferencia y envía el comprobante a tiempo. La orden no podrá procesarse ni pasar a cocina hasta que Administración confirme el pago.</p>
         <div className="success-ticket">
           <div><span>Para</span><strong>{students.map((student) => student.name).join(" · ")}</strong></div>
           <div><span>Entrega</span><strong>{selectedDateLabel} · 11:30 a. m. · EIS</strong></div>
@@ -2886,6 +2957,10 @@ function NotificationCenter({ notifications, close, openOrders, openSupport }: {
   const copy: Record<string, { title: string; message: string; action: "orders" | "support" }> = {
     payment_approved: { title: "Pago confirmado", message: "Tu transferencia fue aprobada y el pedido ya pasó a cocina.", action: "orders" },
     payment_amount_mismatch: { title: "Revisa el monto transferido", message: "Encontramos una diferencia en el comprobante. Revisa tu pedido para indicar cómo deseas continuar.", action: "orders" },
+    payment_receipt_requested: { title: "Comprobante requerido", message: "Necesitamos el comprobante de transferencia para confirmar tu pedido y enviarlo a cocina.", action: "orders" },
+    payment_receipt_reminder: { title: "Tu pedido sigue pendiente", message: "Aún no recibimos el comprobante. Envíalo antes del cierre para que el pedido pueda procesarse.", action: "orders" },
+    payment_rejected: { title: "Comprobante no aprobado", message: "No pudimos validar el comprobante. Revisa tu pedido y envía uno nuevo o comunícate con Pipiro.", action: "orders" },
+    payment_cancelled: { title: "Pedido cancelado", message: "Administración canceló este pedido. Revisa Mis pedidos o comunícate con Pipiro si necesitas ayuda.", action: "orders" },
     order_delivered: { title: "Almuerzo entregado", message: "La institución confirmó que el almuerzo fue entregado.", action: "orders" },
     support_response: { title: "Pipiro respondió tu mensaje", message: "Ya puedes leer la respuesta en la sección de Ayuda.", action: "support" },
   };

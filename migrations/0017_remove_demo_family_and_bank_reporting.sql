@@ -10,6 +10,8 @@ WHERE bank_account_id IS NULL
   AND EXISTS (SELECT 1 FROM bank_accounts WHERE is_active = 1);
 
 -- The official application no longer carries the seeded family account or student profiles.
+DELETE FROM payment_batches WHERE guardian_user_id = 'user_demo_family';
+DELETE FROM orders WHERE guardian_user_id = 'user_demo_family';
 DELETE FROM students WHERE guardian_user_id = 'user_demo_family';
 DELETE FROM app_users WHERE id = 'user_demo_family';
 

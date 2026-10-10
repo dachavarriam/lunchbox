@@ -491,17 +491,26 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     if (!isRecord(body) || !["approved", "rejected", "amount_mismatch"].includes(String(body.status))) {
       return cmsJson({ error: "Estado inválido" }, { status: 400 });
     }
+    const reviewNote = optionalText(body.reviewNote, 500);
+    if (reviewNote === null || (body.status === "rejected" && reviewNote.length < 5)) {
+      return cmsJson({ error: "Indica el motivo del rechazo" }, { status: 400 });
+    }
     const payment = await env.DB.prepare(
-      "SELECT id, guardian_user_id, status, amount_due_cents, receipt_object_key FROM payment_batches WHERE id = ? LIMIT 1",
-    ).bind(batchReviewMatch[1]).first<{ id: string; guardian_user_id: string; status: string; amount_due_cents: number; receipt_object_key: string | null }>();
+      `SELECT pb.id, pb.guardian_user_id, pb.status, pb.amount_due_cents, pb.receipt_object_key, u.email
+       FROM payment_batches pb JOIN app_users u ON u.id = pb.guardian_user_id WHERE pb.id = ? LIMIT 1`,
+    ).bind(batchReviewMatch[1]).first<{ id: string; guardian_user_id: string; status: string; amount_due_cents: number; receipt_object_key: string | null; email: string }>();
     if (!payment) return cmsJson({ error: "Pago no encontrado" }, { status: 404 });
+    if (["approved", "cancelled", "expired", "refunded"].includes(payment.status)) {
+      return cmsJson({ error: "Este pago ya no se puede conciliar" }, { status: 409 });
+    }
     if (!payment.receipt_object_key) return cmsJson({ error: "No hay comprobante para revisar" }, { status: 409 });
     if (body.status === "amount_mismatch") {
       if (typeof body.receivedCents !== "number" || !Number.isInteger(body.receivedCents) || body.receivedCents < 0 || body.receivedCents === payment.amount_due_cents) {
         return cmsJson({ error: "Indica el monto recibido correcto" }, { status: 400 });
       }
       await env.DB.batch([
-        env.DB.prepare("UPDATE payment_batches SET status = 'amount_mismatch', reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(payment.id),
+        env.DB.prepare("UPDATE payment_batches SET status = 'amount_mismatch', review_note = ?, reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+          .bind(reviewNote || "El monto recibido no coincide con el pedido", actorUserId, payment.id),
         env.DB.prepare(
           `INSERT INTO payment_issues (id, payment_batch_id, expected_cents, received_cents, difference_cents)
            VALUES (?, ?, ?, ?, ?)`,
@@ -510,12 +519,18 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
           `INSERT INTO notifications (id, user_id, channel, template_key)
            VALUES (?, ?, 'in_app', 'payment_amount_mismatch')`,
         ).bind(crypto.randomUUID(), payment.guardian_user_id),
+        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', 'payment_amount_mismatch', ?)")
+          .bind(crypto.randomUUID(), payment.guardian_user_id, payment.email, JSON.stringify({ paymentBatchId: payment.id })),
+        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, channel, template_key, payload_json) VALUES (?, ?, 'push', 'payment_amount_mismatch', ?)")
+          .bind(crypto.randomUUID(), payment.guardian_user_id, JSON.stringify({ paymentBatchId: payment.id })),
+        env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, metadata_json) VALUES (?, ?, 'payment.amount_mismatch', 'payment_batch', ?, ?)")
+          .bind(crypto.randomUUID(), actorUserId, payment.id, JSON.stringify({ receivedCents: body.receivedCents, reviewNote })),
       ]);
       return cmsJson({ ok: true, status: "amount_mismatch" });
     }
     const statements: D1PreparedStatement[] = [env.DB.prepare(
-      "UPDATE payment_batches SET status = ?, reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    ).bind(body.status, actorUserId, payment.id)];
+      "UPDATE payment_batches SET status = ?, review_note = ?, reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+    ).bind(body.status, reviewNote || null, actorUserId, payment.id)];
     if (body.status === "approved") statements.push(env.DB.prepare(
       `UPDATE orders SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP
        WHERE id IN (SELECT order_id FROM payment_batch_orders WHERE payment_batch_id = ?) AND status = 'submitted'`,
@@ -528,8 +543,120 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
       env.DB.prepare("INSERT INTO notification_outbox (id, user_id, channel, template_key, payload_json) VALUES (?, ?, 'push', 'payment_approved', ?)")
         .bind(crypto.randomUUID(), payment.guardian_user_id, JSON.stringify({ paymentBatchId: payment.id })),
     );
+    if (body.status === "rejected") statements.push(
+      env.DB.prepare("INSERT INTO notifications (id, user_id, channel, template_key) VALUES (?, ?, 'in_app', 'payment_rejected')")
+        .bind(crypto.randomUUID(), payment.guardian_user_id),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', 'payment_rejected', ?)")
+        .bind(crypto.randomUUID(), payment.guardian_user_id, payment.email, JSON.stringify({ paymentBatchId: payment.id, reason: reviewNote })),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, channel, template_key, payload_json) VALUES (?, ?, 'push', 'payment_rejected', ?)")
+        .bind(crypto.randomUUID(), payment.guardian_user_id, JSON.stringify({ paymentBatchId: payment.id, reason: reviewNote })),
+    );
+    statements.push(env.DB.prepare(
+      "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, metadata_json) VALUES (?, ?, ?, 'payment_batch', ?, ?)",
+    ).bind(crypto.randomUUID(), actorUserId, `payment.${String(body.status)}`, payment.id, JSON.stringify({ reviewNote })));
     await env.DB.batch(statements);
     return cmsJson({ ok: true, status: body.status });
+  }
+
+  const batchActionMatch = url.pathname.match(/^\/api\/demo\/admin\/payment-batches\/([^/]+)\/action$/);
+  if (request.method === "POST" && batchActionMatch) {
+    const body = await boundedJson(request);
+    if (!isRecord(body) || !["request_receipt", "remind_receipt", "cancel"].includes(String(body.action))) {
+      return cmsJson({ error: "Acción inválida" }, { status: 400 });
+    }
+    const payment = await env.DB.prepare(
+      `SELECT pb.id, pb.checkout_number, pb.guardian_user_id, pb.status, pb.receipt_object_key,
+              pb.credit_applied_cents, pb.last_reminder_at, u.email
+       FROM payment_batches pb JOIN app_users u ON u.id = pb.guardian_user_id
+       WHERE pb.id = ? LIMIT 1`,
+    ).bind(batchActionMatch[1]).first<{
+      id: string; checkout_number: string; guardian_user_id: string; status: string; receipt_object_key: string | null;
+      credit_applied_cents: number; last_reminder_at: string | null; email: string;
+    }>();
+    if (!payment) return cmsJson({ error: "Pago no encontrado" }, { status: 404 });
+    const action = String(body.action);
+
+    if (action === "cancel") {
+      const reason = requiredText(body.reason, 500);
+      if (!reason || reason.length < 5) return cmsJson({ error: "Indica el motivo de la cancelación" }, { status: 400 });
+      if (!["pending", "under_review", "rejected", "amount_mismatch"].includes(payment.status)) {
+        return cmsJson({ error: "Solo se pueden cancelar pedidos que todavía no tienen el pago aprobado" }, { status: 409 });
+      }
+      const linkedOrders = await env.DB.prepare(
+        `SELECT o.id, o.status FROM orders o JOIN payment_batch_orders pbo ON pbo.order_id = o.id
+         WHERE pbo.payment_batch_id = ? AND o.status != 'cancelled'`,
+      ).bind(payment.id).all<{ id: string; status: string }>();
+      const statements: D1PreparedStatement[] = [
+        env.DB.prepare(
+          `UPDATE menu_items SET remaining = remaining + COALESCE((
+             SELECT SUM(oi.quantity) FROM order_items oi JOIN orders o ON o.id = oi.order_id
+             JOIN payment_batch_orders pbo ON pbo.order_id = o.id
+             WHERE pbo.payment_batch_id = ? AND o.menu_day_id = menu_items.menu_day_id
+               AND oi.dish_id = menu_items.dish_id AND o.status != 'cancelled'
+           ), 0)
+           WHERE remaining IS NOT NULL AND EXISTS (
+             SELECT 1 FROM order_items oi JOIN orders o ON o.id = oi.order_id
+             JOIN payment_batch_orders pbo ON pbo.order_id = o.id
+             WHERE pbo.payment_batch_id = ? AND o.menu_day_id = menu_items.menu_day_id
+               AND oi.dish_id = menu_items.dish_id AND o.status != 'cancelled'
+           )`,
+        ).bind(payment.id, payment.id),
+        env.DB.prepare(
+          `UPDATE orders SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+           WHERE id IN (SELECT order_id FROM payment_batch_orders WHERE payment_batch_id = ?) AND status != 'cancelled'`,
+        ).bind(payment.id),
+        ...linkedOrders.results.map((order) => env.DB.prepare(
+          "INSERT INTO order_status_events (id, order_id, from_status, to_status, actor_user_id, note) VALUES (?, ?, ?, 'cancelled', ?, ?)",
+        ).bind(crypto.randomUUID(), order.id, order.status, actorUserId, `Cancelado por Administración: ${reason}`)),
+        env.DB.prepare(
+          `UPDATE payment_batches SET status = 'cancelled', cancellation_reason = ?, review_note = ?,
+           reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+        ).bind(reason, reason, actorUserId, payment.id),
+        env.DB.prepare("INSERT INTO notifications (id, user_id, channel, template_key) VALUES (?, ?, 'in_app', 'payment_cancelled')")
+          .bind(crypto.randomUUID(), payment.guardian_user_id),
+        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', 'payment_cancelled', ?)")
+          .bind(crypto.randomUUID(), payment.guardian_user_id, payment.email, JSON.stringify({ paymentBatchId: payment.id, reason })),
+        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, channel, template_key, payload_json) VALUES (?, ?, 'push', 'payment_cancelled', ?)")
+          .bind(crypto.randomUUID(), payment.guardian_user_id, JSON.stringify({ paymentBatchId: payment.id, reason })),
+        env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, metadata_json) VALUES (?, ?, 'payment.cancelled', 'payment_batch', ?, ?)")
+          .bind(crypto.randomUUID(), actorUserId, payment.id, JSON.stringify({ reason })),
+      ];
+      if (payment.credit_applied_cents > 0) statements.push(env.DB.prepare(
+        `INSERT INTO credit_ledger (id, user_id, amount_cents, entry_type, reason, payment_batch_id, created_by_user_id)
+         SELECT ?, ?, ?, 'cancellation_credit', ?, ?, ?
+         WHERE NOT EXISTS (
+           SELECT 1 FROM credit_ledger WHERE payment_batch_id = ? AND entry_type = 'cancellation_credit'
+         )`,
+      ).bind(crypto.randomUUID(), payment.guardian_user_id, payment.credit_applied_cents,
+        `Crédito devuelto por cancelación administrativa de ${payment.checkout_number}`, payment.id, actorUserId, payment.id));
+      await env.DB.batch(statements);
+      return cmsJson({ ok: true, status: "cancelled" });
+    }
+
+    if (payment.receipt_object_key) return cmsJson({ error: "Este pago ya tiene un comprobante para revisar" }, { status: 409 });
+    if (!["pending", "rejected"].includes(payment.status)) return cmsJson({ error: "Este pago ya no admite recordatorios" }, { status: 409 });
+    if (action === "remind_receipt" && payment.last_reminder_at &&
+        Date.now() - new Date(`${payment.last_reminder_at.replace(" ", "T")}Z`).getTime() < 10 * 60 * 1000) {
+      return cmsJson({ error: "Espera al menos 10 minutos antes de enviar otro recordatorio" }, { status: 429 });
+    }
+    const templateKey = action === "request_receipt" ? "payment_receipt_requested" : "payment_receipt_reminder";
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE payment_batches SET receipt_requested_at = COALESCE(receipt_requested_at, CURRENT_TIMESTAMP),
+         receipt_request_count = receipt_request_count + 1,
+         last_reminder_at = CASE WHEN ? = 'remind_receipt' THEN CURRENT_TIMESTAMP ELSE last_reminder_at END,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      ).bind(action, payment.id),
+      env.DB.prepare("INSERT INTO notifications (id, user_id, channel, template_key) VALUES (?, ?, 'in_app', ?)")
+        .bind(crypto.randomUUID(), payment.guardian_user_id, templateKey),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', ?, ?)")
+        .bind(crypto.randomUUID(), payment.guardian_user_id, payment.email, templateKey, JSON.stringify({ paymentBatchId: payment.id })),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, channel, template_key, payload_json) VALUES (?, ?, 'push', ?, ?)")
+        .bind(crypto.randomUUID(), payment.guardian_user_id, templateKey, JSON.stringify({ paymentBatchId: payment.id })),
+      env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, ?, 'payment_batch', ?)")
+        .bind(crypto.randomUUID(), actorUserId, `payment.${action}`, payment.id),
+    ]);
+    return cmsJson({ ok: true, action });
   }
 
   if (request.method === "GET" && url.pathname === "/api/demo/admin/support") {

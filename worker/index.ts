@@ -38,6 +38,10 @@ type DemoOrderRow = {
   classroom: string;
   dish: string;
   allergies: string | null;
+  special_instructions: string | null;
+  student_delivery_notes: string | null;
+  guardian_name: string;
+  guardian_email: string;
   payment_status: string;
   payment_method: string;
   customer_reference: string | null;
@@ -50,6 +54,11 @@ type DemoOrderRow = {
   bank_account_id: string | null;
   bank_label: string | null;
   bank_name: string | null;
+  receipt_requested_at: string | null;
+  receipt_request_count: number;
+  last_reminder_at: string | null;
+  payment_review_note: string | null;
+  payment_cancellation_reason: string | null;
   created_at: string;
   prep_time_minutes: number;
   stage_started_at: string;
@@ -242,9 +251,16 @@ async function loadDemoOrders(env: Env, actorUserId: string | null): Promise<Dem
     `SELECT o.id, o.order_number, o.status, o.total_cents, o.created_at,
             md.service_date, sw.service_type, sw.delivery_time,
             s.first_name || ' ' || s.last_name AS student_name,
+            s.delivery_notes AS student_delivery_notes,
             c.grade || ' ' || c.section || ' · ' || COALESCE(c.classroom_name, '') AS classroom,
             o.allergy_snapshot AS allergies,
+            o.special_instructions,
+            u.display_name AS guardian_name, u.email AS guardian_email,
             GROUP_CONCAT(oi.dish_name_snapshot || ' ×' || oi.quantity ||
+              CASE WHEN COALESCE(oi.options_snapshot_json, '{}') <> '{}' THEN
+                COALESCE(' · ' || (SELECT GROUP_CONCAT(opt.name_es, ', ')
+                  FROM json_each(oi.options_snapshot_json) selected
+                  JOIN dish_options opt ON opt.id = selected.value), '') ELSE '' END ||
               CASE WHEN TRIM(COALESCE(oi.item_notes, '')) <> '' THEN ' · CAMBIO: ' || TRIM(oi.item_notes) ELSE '' END, ' · ') AS dish,
             MAX(COALESCE(d.prep_time_minutes, 15)) AS prep_time_minutes,
             COALESCE((SELECT MAX(ose.created_at) FROM order_status_events ose WHERE ose.order_id = o.id AND ose.to_status = o.status), o.updated_at, o.created_at) AS stage_started_at,
@@ -259,8 +275,12 @@ async function loadDemoOrders(env: Env, actorUserId: string | null): Promise<Dem
             COALESCE(pb.receipt_original_name, pt.receipt_original_name) AS receipt_original_name,
             COALESCE(pb.receipt_submitted_at, pt.receipt_submitted_at) AS receipt_submitted_at,
             pb.id AS payment_batch_id, pb.checkout_number, pb.expires_at AS payment_expires_at,
-            pb.bank_account_id, ba.label AS bank_label, ba.bank_name
+            pb.bank_account_id, ba.label AS bank_label, ba.bank_name,
+            pb.receipt_requested_at, COALESCE(pb.receipt_request_count, 0) AS receipt_request_count,
+            pb.last_reminder_at, pb.review_note AS payment_review_note,
+            pb.cancellation_reason AS payment_cancellation_reason
      FROM orders o
+     JOIN app_users u ON u.id = o.guardian_user_id
      JOIN students s ON s.id = o.student_id
      LEFT JOIN classrooms c ON c.id = s.classroom_id
      JOIN menu_days md ON md.id = o.menu_day_id
@@ -1122,7 +1142,8 @@ const worker = {
         if (access) return access;
       }
       const dispatchPushImmediately = request.method !== "GET" &&
-        (url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/admin\/(payment-batches|support)\/[^/]+$/.test(url.pathname));
+        (url.pathname === "/api/demo/kds/deliver-all" ||
+          /^\/api\/demo\/admin\/(payment-batches|support)\/[^/]+(?:\/action)?$/.test(url.pathname));
       const cmsResponse = await handleCmsApi(request, env, url);
       if (cmsResponse) {
         if (dispatchPushImmediately && cmsResponse.ok) ctx.waitUntil(processPushOutbox(env));

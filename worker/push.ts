@@ -17,6 +17,11 @@ type PushOutboxRow = {
 
 const pushCopy: Record<string, { title: string; body: string }> = {
   payment_approved: { title: "Pago confirmado", body: "Tu pago fue aprobado y el pedido pasó a cocina." },
+  payment_amount_mismatch: { title: "Revisa el monto", body: "El monto recibido no coincide con el total de tu pedido." },
+  payment_receipt_requested: { title: "Comprobante requerido", body: "Envía el comprobante para que podamos confirmar tu pedido." },
+  payment_receipt_reminder: { title: "Pedido pendiente", body: "Aún necesitamos tu comprobante para procesar el pedido." },
+  payment_rejected: { title: "Comprobante no aprobado", body: "Revisa tu pedido y envía un nuevo comprobante." },
+  payment_cancelled: { title: "Pedido cancelado", body: "Administración canceló tu pedido. Revisa los detalles en Pipiro." },
   order_delivered: { title: "Almuerzo entregado", body: "La institución confirmó la entrega del almuerzo." },
   support_request_created: { title: "Nueva solicitud de ayuda", body: "Hay un nuevo mensaje de un cliente en Administración." },
   support_response: { title: "Respuesta de Pipiro", body: "Respondimos tu solicitud de ayuda. Puedes revisarla en la aplicación." },
