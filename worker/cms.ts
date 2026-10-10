@@ -503,7 +503,9 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     if (["approved", "cancelled", "expired", "refunded"].includes(payment.status)) {
       return cmsJson({ error: "Este pago ya no se puede conciliar" }, { status: 409 });
     }
-    if (!payment.receipt_object_key) return cmsJson({ error: "No hay comprobante para revisar" }, { status: 409 });
+    if (!payment.receipt_object_key && body.status !== "approved") {
+      return cmsJson({ error: "No hay comprobante para revisar" }, { status: 409 });
+    }
     if (body.status === "amount_mismatch") {
       if (typeof body.receivedCents !== "number" || !Number.isInteger(body.receivedCents) || body.receivedCents < 0 || body.receivedCents === payment.amount_due_cents) {
         return cmsJson({ error: "Indica el monto recibido correcto" }, { status: 400 });
@@ -530,7 +532,7 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     }
     const statements: D1PreparedStatement[] = [env.DB.prepare(
       "UPDATE payment_batches SET status = ?, review_note = ?, reviewed_by_user_id = ?, reviewed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-    ).bind(body.status, reviewNote || null, actorUserId, payment.id)];
+    ).bind(body.status, reviewNote || (payment.receipt_object_key ? null : "Aprobación manual sin comprobante"), actorUserId, payment.id)];
     if (body.status === "approved") statements.push(env.DB.prepare(
       `UPDATE orders SET status = 'confirmed', updated_at = CURRENT_TIMESTAMP
        WHERE id IN (SELECT order_id FROM payment_batch_orders WHERE payment_batch_id = ?) AND status = 'submitted'`,
@@ -553,7 +555,8 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     );
     statements.push(env.DB.prepare(
       "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, metadata_json) VALUES (?, ?, ?, 'payment_batch', ?, ?)",
-    ).bind(crypto.randomUUID(), actorUserId, `payment.${String(body.status)}`, payment.id, JSON.stringify({ reviewNote })));
+    ).bind(crypto.randomUUID(), actorUserId, `payment.${String(body.status)}`, payment.id,
+      JSON.stringify({ reviewNote, manualWithoutReceipt: body.status === "approved" && !payment.receipt_object_key })));
     await env.DB.batch(statements);
     return cmsJson({ ok: true, status: body.status });
   }

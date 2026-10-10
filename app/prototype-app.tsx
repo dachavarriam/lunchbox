@@ -1716,6 +1716,9 @@ function AdminView({
   const reviewTransfer = async (paymentId: string, status: "approved" | "rejected" | "amount_mismatch") => {
     setReviewingOrderId(paymentId);
     try {
+      const payment = orders.find((order) => order.payment_batch_id === paymentId);
+      if (status === "approved" && !payment?.receipt_object_key &&
+          !window.confirm("Esta orden no tiene comprobante. ¿Confirmas la aprobación manual y el envío a cocina?")) return;
       const received = status === "amount_mismatch" ? window.prompt("Monto recibido en lempiras") : null;
       if (status === "amount_mismatch" && (received === null || !Number.isFinite(Number(received)))) return;
       const reviewNote = status === "rejected"
@@ -1916,13 +1919,14 @@ function AdminView({
                   </div>
                   <div className="transfer-proof">
                     <div><strong>{payment.receipt_object_key ? `Comprobante: ${payment.receipt_original_name ?? "imagen recibida"}` : "Comprobante pendiente"}</strong>
-                      <span>{payment.receipt_submitted_at ? `Recibido: ${payment.receipt_submitted_at}` : payment.receipt_requested_at ? `Solicitado ${payment.receipt_request_count} vez${payment.receipt_request_count === 1 ? "" : "es"}` : "Aún no se ha solicitado desde Administración"}</span>
+                      <span>{payment.receipt_submitted_at ? `Recibido: ${payment.receipt_submitted_at}` : payment.receipt_requested_at ? `Solicitado ${payment.receipt_request_count} ${payment.receipt_request_count === 1 ? "vez" : "veces"}` : "Aún no se ha solicitado desde Administración"}</span>
                     </div>
                     {payment.receipt_object_key && <a href={`/api/demo/admin/payments/${paymentId}/receipt`} target="_blank" rel="noreferrer">Ver comprobante</a>}
                   </div>
                   <div className="transfer-actions">
                     {!payment.receipt_object_key && <button className="secondary-transfer" disabled={busy} onClick={() => void paymentAction(paymentId, "request_receipt")}>Pedir comprobante</button>}
                     {!payment.receipt_object_key && <button className="secondary-transfer" disabled={busy} onClick={() => void paymentAction(paymentId, "remind_receipt")}>Enviar recordatorio</button>}
+                    {!payment.receipt_object_key && <button disabled={busy} onClick={() => void reviewTransfer(paymentId, "approved")}>Aprobar manualmente</button>}
                     {payment.receipt_object_key && <button className="reject-transfer" disabled={busy} onClick={() => void reviewTransfer(paymentId, "rejected")}>Rechazar comprobante</button>}
                     {payment.receipt_object_key && <button className="secondary-transfer" disabled={busy} onClick={() => void reviewTransfer(paymentId, "amount_mismatch")}>Monto incorrecto</button>}
                     {payment.receipt_object_key && <button disabled={busy} onClick={() => void reviewTransfer(paymentId, "approved")}>Aprobar y enviar a cocina</button>}

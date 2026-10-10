@@ -192,6 +192,8 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.match(prototypeSource, /Platillos más vendidos/);
   assert.match(prototypeSource, /El comprobante es indispensable/);
   assert.match(prototypeSource, /Pedir comprobante/);
+  assert.match(prototypeSource, /Aprobar manualmente/);
+  assert.doesNotMatch(prototypeSource, /vez\$\{payment\.receipt_request_count === 1 \? "" : "es"\}/);
   assert.match(prototypeSource, /Cancelar pedido/);
   assert.doesNotMatch(workerSource, /excludeDemoActor/);
   assert.match(cmsSource, /date\(pb\.created_at, '-6 hours'\)/);
