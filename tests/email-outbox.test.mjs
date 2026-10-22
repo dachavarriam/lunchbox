@@ -58,7 +58,7 @@ function makeFakeDb(rows, users = { user_1: "family@example.com" }) {
   };
 }
 
-const baseEnv = { APP_ORIGIN: "https://pipiro.solomexicohn.com", EMAIL_FROM: "Pipiro <pedidos@pipiro.solomexicohn.com>" };
+const baseEnv = { APP_ORIGIN: "https://pipiro.solomexicohn.com", EMAIL_FROM: "Pipiro by Solo México <pedidos@pipiro.solomexicohn.com>" };
 
 test("processEmailOutbox is a no-op without RESEND_API_KEY", async () => {
   const db = makeFakeDb([{ id: "a", channel: "email", status: "queued", attempts: 0, user_id: "user_1", recipient_email: null, template_key: "payment_approved" }]);
