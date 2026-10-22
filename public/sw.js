@@ -1,5 +1,14 @@
-const CACHE_NAME = "pipiro-prototype-v6";
+const CACHE_NAME = "pipiro-prototype-v7";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/pipiro-logo.png", "/pipiro-fondo.png", "/icon-600.png"];
+
+// Nunca se cachean respuestas de /api/*: pueden incluir alergias, comprobantes
+// de pago u otros datos de familias y estudiantes. Solo el app shell y los
+// bundles estáticos de compilación son elegibles para caché offline.
+function isCacheableRequest(url) {
+  if (url.origin !== self.location.origin) return false;
+  if (url.pathname.startsWith("/api/")) return false;
+  return APP_SHELL.includes(url.pathname) || url.pathname.startsWith("/assets/");
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
@@ -17,13 +26,21 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "CLEAR_CACHES") {
+    event.waitUntil(caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key)))));
+  }
+});
+
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
+  if (!isCacheableRequest(url)) return;
 
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        if (response.ok && new URL(event.request.url).origin === self.location.origin) {
+        if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         }

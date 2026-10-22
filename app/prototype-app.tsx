@@ -1144,6 +1144,12 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const logout = async () => {
     const response = await fetch("/api/auth/logout", { method: "POST" });
     if (!response.ok) { showToast("No se pudo cerrar la sesión"); return; }
+    if (typeof caches !== "undefined") {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((key) => caches.delete(key)));
+      } catch { /* El almacenamiento de caché no está disponible; continuar con el cierre de sesión. */ }
+    }
     window.location.assign("/login");
   };
 
