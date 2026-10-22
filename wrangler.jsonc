@@ -55,11 +55,8 @@
     "VAPID_PUBLIC_KEY": "BAnZDyTlMXVSYsTPCKNrCZCNzK-HMXh-bURHG6UFsTEFsxitG8xwk3XCer5bSnGk8M8MRTiYX2Ph86n3M2tmhHQ",
     "VAPID_SUBJECT": "mailto:pedidos@solomexicohn.com",
     "TURNSTILE_SITE_KEY": "0x4AAAAAAFhI35fmBflkEJWx",
-    "EMAIL_FROM": "pedidos@solomexicohn.com"
+    "EMAIL_FROM": "Pipiro <pedidos@send.solomexicohn.com>"
   },
-  "send_email": [
-    { "name": "EMAIL" }
-  ],
   "observability": {
     "enabled": true,
     "logs": {

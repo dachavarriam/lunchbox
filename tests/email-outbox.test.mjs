@@ -58,55 +58,66 @@ function makeFakeDb(rows, users = { user_1: "family@example.com" }) {
   };
 }
 
-function makeFakeEmailBinding(sendImpl) {
-  const calls = [];
-  return {
-    calls,
-    send: async (message) => {
-      calls.push(message);
-      return sendImpl ? sendImpl(message) : { messageId: "test-message-id" };
-    },
-  };
-}
+const baseEnv = { APP_ORIGIN: "https://pipiro.solomexicohn.com", EMAIL_FROM: "Pipiro <pedidos@send.solomexicohn.com>" };
 
-const baseEnv = { APP_ORIGIN: "https://pipiro.solomexicohn.com", EMAIL_FROM: "pedidos@solomexicohn.com" };
-
-test("processEmailOutbox is a no-op without the EMAIL binding", async () => {
+test("processEmailOutbox is a no-op without RESEND_API_KEY", async () => {
   const db = makeFakeDb([{ id: "a", channel: "email", status: "queued", attempts: 0, user_id: "user_1", recipient_email: null, template_key: "payment_approved" }]);
-  await processEmailOutbox({ DB: db, ...baseEnv });
+  let fetchCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { fetchCalled = true; return new Response("{}", { status: 200 }); };
+  try {
+    await processEmailOutbox({ DB: db, ...baseEnv });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(fetchCalled, false);
   assert.equal(db.outbox[0].status, "queued");
 });
 
 test("processEmailOutbox resolves the recipient via user_id and marks the message sent", async () => {
   const db = makeFakeDb([{ id: "b", channel: "email", status: "queued", attempts: 0, user_id: "user_1", recipient_email: null, template_key: "payment_approved" }]);
-  const EMAIL = makeFakeEmailBinding();
-  await processEmailOutbox({ DB: db, EMAIL, ...baseEnv });
+  let capturedBody = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(url, "https://api.resend.com/emails");
+    assert.equal(init.headers.Authorization, "Bearer re_test_key");
+    capturedBody = JSON.parse(init.body);
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    await processEmailOutbox({ DB: db, RESEND_API_KEY: "re_test_key", ...baseEnv });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
   assert.equal(db.outbox[0].status, "sent");
-  assert.equal(EMAIL.calls.length, 1);
-  assert.equal(EMAIL.calls[0].to, "family@example.com");
-  assert.deepEqual(EMAIL.calls[0].from, { email: "pedidos@solomexicohn.com", name: "Pipiro" });
-  assert.match(EMAIL.calls[0].subject, /aprobado/i);
-  assert.match(EMAIL.calls[0].html, /https:\/\/pipiro\.solomexicohn\.com\/\?view=orders/);
+  assert.equal(capturedBody.to, "family@example.com");
+  assert.equal(capturedBody.from, baseEnv.EMAIL_FROM);
+  assert.match(capturedBody.subject, /aprobado/i);
+  assert.match(capturedBody.html, /https:\/\/pipiro\.solomexicohn\.com\/\?view=orders/);
 });
 
 test("processEmailOutbox requeues failed sends until attempts run out", async () => {
   const db = makeFakeDb([{ id: "c", channel: "email", status: "queued", attempts: 2, user_id: "user_1", recipient_email: null, template_key: "payment_rejected" }]);
-  const EMAIL = makeFakeEmailBinding(() => {
-    const error = new Error("sender domain not onboarded");
-    error.code = "E_SENDER_DOMAIN_NOT_AVAILABLE";
-    throw error;
-  });
-  await processEmailOutbox({ DB: db, EMAIL, ...baseEnv });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("server error", { status: 500 });
+  try {
+    await processEmailOutbox({ DB: db, RESEND_API_KEY: "re_test_key", ...baseEnv });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
   assert.equal(db.outbox[0].attempts, 3);
   assert.equal(db.outbox[0].status, "failed");
-  assert.match(db.outbox[0].last_error, /E_SENDER_DOMAIN_NOT_AVAILABLE/);
 });
 
-test("processEmailOutbox marks the message failed without calling EMAIL.send when no recipient is on file", async () => {
+test("processEmailOutbox marks the message failed without calling Resend when no recipient is on file", async () => {
   const db = makeFakeDb([{ id: "d", channel: "email", status: "queued", attempts: 0, user_id: "user_unknown", recipient_email: null, template_key: "payment_approved" }]);
-  const EMAIL = makeFakeEmailBinding(() => { throw new Error("should not be called"); });
-  await processEmailOutbox({ DB: db, EMAIL, ...baseEnv });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("should not be called"); };
+  try {
+    await processEmailOutbox({ DB: db, RESEND_API_KEY: "re_test_key", ...baseEnv });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
   assert.equal(db.outbox[0].status, "failed");
   assert.match(db.outbox[0].last_error, /correo del destinatario/);
-  assert.equal(EMAIL.calls.length, 0);
 });

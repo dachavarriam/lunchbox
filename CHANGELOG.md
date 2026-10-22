@@ -38,15 +38,25 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
 
 ### 2026-10-22 (continuación) — Turnstile con el widget real
 
-- El usuario creó el widget en el dashboard de Cloudflare (sitekey `0x4AAAAAAFhI35fmBflkEJWx`); quedó puesto en `wrangler.jsonc` (`TURNSTILE_SITE_KEY`). El Secret Key **no pasó por este chat** — queda pendiente que el usuario lo guarde él mismo con `wrangler secret put TURNSTILE_SECRET_KEY` en su propia terminal.
+- El usuario creó el widget en el dashboard de Cloudflare (sitekey `0x4AAAAAAFhI35fmBflkEJWx`); quedó puesto en `wrangler.jsonc` (`TURNSTILE_SITE_KEY`). El Secret Key **no pasó por este chat** — el usuario lo guardó él mismo con `wrangler secret put TURNSTILE_SECRET_KEY` en su propia terminal. ✅ Hecho.
 - **feat(turnstile):** siguiendo el patrón recomendado por Cloudflare, la verificación ahora valida también `action` (`"login"`, puesto en el widget y comprobado en el servidor) y `hostname` (debe ser uno de los tres dominios de Pipiro, más el host actual en hosts privados de desarrollo) — no solo `success === true`. Esto evita que un token resuelto en otra página se reuse contra este endpoint.
   Archivos: `worker/turnstile.ts` (`expectedTurnstileHostnames`, firma nueva de `verifyTurnstileToken`), `worker/auth.ts`, `app/google-login-button.tsx` (`action: "login"` en el widget).
 - Probado en navegador con el sitekey real: el widget de Turnstile carga y se renderiza correctamente en `/login` sin errores de consola, y el botón "Continuar con Google" queda deshabilitado (sin `href`) hasta que se resuelve el reto — confirma que el gateo del lado cliente funciona. No se forzó la resolución del reto (sería pelear contra la propia protección anti-bot de Turnstile); la prueba de extremo a extremo con un humano real queda para el usuario.
-- **Decisión de diseño — Resend descartado a favor del Email Service nativo de Cloudflare**, consultado con el skill `cloudflare-email-service` (ver arriba): mismo dominio ya está en Cloudflare DNS, `wrangler email sending enable` agrega los registros SPF/DKIM automáticamente sin copiar nada a mano, y el binding `send_email` no necesita ninguna API key — todo queda dentro de la cuenta de Cloudflare como pidió el usuario.
+
+### 2026-10-22 (continuación 2) — vuelta a Resend; Cloudflare Email Sending requiere plan pagado
+
+- `wrangler email sending enable solomexicohn.com` falló (`Unauthorized [code: 2036]`) por el CLI; el usuario lo intentó también desde el dashboard y ahí quedó claro que **Email Sending requiere el plan Workers Paid** ($5/mes, incluye 3,000 correos/mes, luego $0.35 por cada 1,000 — [precio oficial](https://developers.cloudflare.com/email-service/platform/pricing/)). Lo que el usuario ya tenía activo (**Email Routing**, gratis) no sirve para este caso: solo recibe correo y puede reenviar a direcciones ya verificadas o responder a un correo entrante — no puede mandar un aviso nuevo a un Gmail de familia que nunca escribió primero.
+- Decisión final: **volver a Resend** (plan gratis: 3,000 correos/mes, 100/día, 1 dominio — suficiente para el piloto). Revertido `worker/email.ts` a la API REST de Resend, quitado el binding `send_email` de `wrangler.jsonc`, `EMAIL_FROM` ajustado a `pedidos@send.solomexicohn.com` (subdominio, no el dominio raíz, porque ahí ya están los MX de Email Routing — Resend también lo recomienda para aislar reputación de envío).
+  Archivos: `worker/email.ts`, `wrangler.jsonc`, `tests/email-outbox.test.mjs`, `worker-configuration.d.ts`.
+- `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
 
 ### Pendiente / próximos pasos identificados (no implementados todavía)
 
-- **Acción pendiente del usuario:** correr `wrangler secret put TURNSTILE_SECRET_KEY` (en su propia terminal, nunca pegado en el chat) y `wrangler email sending enable solomexicohn.com` antes de desplegar, para que Turnstile y el correo queden realmente activos en producción.
+- **Acción pendiente del usuario:**
+  1. Agregar el dominio en Resend (recomendado: usar el botón "Sign in to Cloudflare" de Resend para que agregue los registros DNS solo; si no, copiar manualmente el MX + 2 TXT que pide a `send.solomexicohn.com` en Cloudflare DNS, con proxy en "DNS Only").
+  2. Verificar el dominio en Resend.
+  3. `wrangler secret put RESEND_API_KEY` en su propia terminal (nunca pegado en el chat).
+  4. Confirmar que `EMAIL_FROM` en `wrangler.jsonc` coincide exactamente con el subdominio verificado.
 - El rol `delivery` ya existe (se puede invitar personal con ese rol) pero no tiene ninguna pantalla asociada; tampoco hay evidencia fotográfica de entrega en el punto de recolección.
 - Login por correo (OTP) todavía no implementado — ahora que existen rate limiting y Turnstile reutilizables, es el momento de construirlo sobre esa base.
 - Resto de hallazgos: exposición pública del número de cuenta bancaria, CSV import real, integración Cybersource/BAC, impresión de etiquetas/comandas, etc.
