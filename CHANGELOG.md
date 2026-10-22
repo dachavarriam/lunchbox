@@ -116,8 +116,6 @@ Registro de trabajo de seguridad/privacidad (rama `security-upgrades`, ya fusion
 - `RESEND_API_KEY` ya se guardó como secreto del Worker (confirmado: "Uploaded secret RESEND_API_KEY"), sin pasar por el chat.
 - `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
 
-### Pendiente / próximos pasos identificados (no implementados todavía)
+### Pendiente / próximos pasos identificados — estado al cierre de la rama `functional-upgrades`
 
-- El rol `delivery` ya existe (se puede invitar personal con ese rol) pero no tiene ninguna pantalla asociada; tampoco hay evidencia fotográfica de entrega en el punto de recolección.
-- CSV import real (hoy solo hay un parser del lado del cliente en el prototipo).
-- Integración Cybersource/BAC, impresión de etiquetas/comandas, etc.
+Ambos puntos de esta lista ya se resolvieron en `functional-upgrades` (ver arriba, sección "bloque Funcional"); se deja el historial para referencia. Ver `CHANGELOG.md` más arriba para lo que sigue pendiente de verdad (push/merge a `main`, auditoría final, Cybersource/BAC, etc.).
