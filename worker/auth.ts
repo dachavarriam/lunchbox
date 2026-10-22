@@ -7,7 +7,7 @@ const AUTH_JSON_HEADERS = {
 const GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-const SESSION_SECONDS = 60 * 60 * 24 * 30;
+const SESSION_SECONDS = 60 * 60 * 24 * 7;
 const OAUTH_STATE_SECONDS = 10 * 60;
 
 type AuthEnv = Env & { GOOGLE_CLIENT_SECRET?: string };
