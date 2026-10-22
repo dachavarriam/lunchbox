@@ -1,5 +1,7 @@
 import { checkRateLimit, clientIp } from "./rate-limit";
-import { verifyTurnstileToken } from "./turnstile";
+import { expectedTurnstileHostnames, verifyTurnstileToken } from "./turnstile";
+
+const TURNSTILE_LOGIN_ACTION = "login";
 
 const AUTH_JSON_HEADERS = {
   "Cache-Control": "no-store",
@@ -256,7 +258,10 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
     });
     const rateLimit = await checkRateLimit(env, `auth_start:${clientIp(request)}`, 15, 10 * 60);
     if (!rateLimit.allowed) return loginFailure("rate_limited");
-    const turnstileOk = await verifyTurnstileToken(env, url.searchParams.get("turnstileToken"), clientIp(request));
+    const expectedHostnames = expectedTurnstileHostnames(env, isPrivateDemoHost(url.hostname) ? url.hostname : null);
+    const turnstileOk = await verifyTurnstileToken(
+      env, url.searchParams.get("turnstileToken"), clientIp(request), TURNSTILE_LOGIN_ACTION, expectedHostnames,
+    );
     if (!turnstileOk) return loginFailure("turnstile_failed");
     const state = randomToken();
     const nonce = randomToken();

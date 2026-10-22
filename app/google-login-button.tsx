@@ -42,7 +42,7 @@ export function GoogleLoginButton({ returnTo }: { returnTo: string }) {
     const renderWidget = () => {
       const container = document.getElementById("turnstile-widget");
       if (container && window.turnstile) {
-        window.turnstile.render(container, { sitekey: siteKey, callback: (widgetToken: string) => setToken(widgetToken) });
+        window.turnstile.render(container, { sitekey: siteKey, action: "login", callback: (widgetToken: string) => setToken(widgetToken) });
       }
     };
     const existing = document.getElementById(TURNSTILE_SCRIPT_ID) as HTMLScriptElement | null;

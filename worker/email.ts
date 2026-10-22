@@ -1,10 +1,11 @@
 /**
- * Processes the `email` channel of notification_outbox via Resend.
- * Needs the RESEND_API_KEY secret; until it's configured this is a no-op, so
- * nothing breaks, it just means the queued emails won't be sent yet.
+ * Processes the `email` channel of notification_outbox via Cloudflare's
+ * native Email Service (the `send_email` binding) — no third-party provider,
+ * no API key. Until the sender domain is onboarded with
+ * `wrangler email sending enable solomexicohn.com`, send() throws
+ * E_SENDER_DOMAIN_NOT_AVAILABLE/E_SENDER_NOT_VERIFIED; those are caught and
+ * handled as a normal retryable failure, so nothing else breaks meanwhile.
  */
-
-type EmailEnv = Env & { RESEND_API_KEY?: string };
 
 type EmailOutboxRow = {
   id: string;
@@ -33,8 +34,7 @@ function emailHtml(subject: string, body: string, appUrl: string): string {
 }
 
 export async function processEmailOutbox(env: Env): Promise<void> {
-  const emailEnv: EmailEnv = env;
-  if (!emailEnv.RESEND_API_KEY || !env.EMAIL_FROM) return;
+  if (!env.EMAIL || !env.EMAIL_FROM) return;
   const appUrl = `${env.APP_ORIGIN ?? ""}/?view=orders`;
 
   const outbox = await env.DB.prepare(
@@ -59,23 +59,17 @@ export async function processEmailOutbox(env: Env): Promise<void> {
     const copy = emailCopy[message.template_key] ?? { subject: "Pipiro", body: "Tienes una actualización de tu pedido." };
     let lastError: string | null = null;
     try {
-      const response = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${emailEnv.RESEND_API_KEY}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          from: env.EMAIL_FROM,
-          to: message.recipient_email,
-          subject: copy.subject,
-          html: emailHtml(copy.subject, copy.body, appUrl),
-          text: `${copy.body}\n\n${appUrl}`,
-        }),
+      await env.EMAIL.send({
+        from: { email: env.EMAIL_FROM, name: "Pipiro" },
+        to: message.recipient_email,
+        subject: copy.subject,
+        html: emailHtml(copy.subject, copy.body, appUrl),
+        text: `${copy.body}\n\n${appUrl}`,
       });
-      if (!response.ok) {
-        const errorBody = await response.text().catch(() => "");
-        throw new Error(`Resend respondió ${response.status}: ${errorBody.slice(0, 300)}`);
-      }
     } catch (error) {
-      lastError = error instanceof Error ? error.message.slice(0, 400) : "No se pudo enviar el correo";
+      const code = error instanceof Error && "code" in error ? String((error as { code: unknown }).code) : undefined;
+      const text = error instanceof Error ? error.message : "No se pudo enviar el correo";
+      lastError = (code ? `${code}: ${text}` : text).slice(0, 400);
     }
 
     if (!lastError) {
