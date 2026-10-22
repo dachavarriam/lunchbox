@@ -1150,6 +1150,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
         await Promise.all(keys.map((key) => caches.delete(key)));
       } catch { /* El almacenamiento de caché no está disponible; continuar con el cierre de sesión. */ }
     }
+    window.localStorage.removeItem(ORDER_DRAFT_KEY);
     window.location.assign("/login");
   };
 
