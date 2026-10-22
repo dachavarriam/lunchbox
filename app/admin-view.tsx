@@ -33,6 +33,18 @@ type CmsImportRow = {
   isActive: boolean;
 };
 
+/** Thrown after kicking off a reauth redirect, so the caller's catch block can skip showing a toast. */
+class ReauthRedirect extends Error {}
+
+/** High-risk admin actions (grant admin/kitchen access, approve/cancel payments, change bank account) require a
+ *  recently-created session; when the backend says so, send the admin to confirm their identity and come back. */
+function throwIfReauthRequired(response: Response, payload: { error?: string }): void {
+  if (response.status === 401 && payload.error === "reauth_required") {
+    window.location.href = `/login?returnTo=${encodeURIComponent(window.location.pathname)}&notice=reauth`;
+    throw new ReauthRedirect();
+  }
+}
+
 function parseCsvTable(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -171,10 +183,11 @@ export function AdminView({
         body: JSON.stringify({ status, reviewNote, ...(received !== null ? { receivedCents: Math.round(Number(received) * 100) } : {}) }),
       });
       const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "No se pudo conciliar la transferencia");
+      if (!response.ok) { throwIfReauthRequired(response, payload); throw new Error(payload.error ?? "No se pudo conciliar la transferencia"); }
       await refreshOrders();
       showToast(status === "approved" ? "Transferencia aprobada; orden enviada a cocina" : "Transferencia rechazada");
     } catch (error) {
+      if (error instanceof ReauthRedirect) return;
       showToast(error instanceof Error ? error.message : "No se pudo conciliar la transferencia");
     } finally {
       setReviewingOrderId(null);
@@ -195,10 +208,11 @@ export function AdminView({
         body: JSON.stringify({ action, reason }),
       });
       const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "No se pudo completar la acción");
+      if (!response.ok) { throwIfReauthRequired(response, payload); throw new Error(payload.error ?? "No se pudo completar la acción"); }
       await refreshOrders();
       showToast(action === "cancel" ? "Pedido cancelado y cliente notificado" : action === "request_receipt" ? "Solicitud de comprobante enviada" : "Recordatorio enviado");
     } catch (error) {
+      if (error instanceof ReauthRedirect) return;
       showToast(error instanceof Error ? error.message : "No se pudo completar la acción");
     } finally {
       setReviewingOrderId(null);
@@ -481,9 +495,9 @@ function PaymentSettingsPanel({ showToast }: { showToast: (message: string) => v
     try {
       const response = await fetch(values.id ? `/api/demo/admin/payment-settings/${values.id}` : "/api/demo/admin/payment-settings", { method: values.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) });
       const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "No se pudo guardar");
+      if (!response.ok) { throwIfReauthRequired(response, payload); throw new Error(payload.error ?? "No se pudo guardar"); }
       await load(); setValues(blank); showToast("Cuenta bancaria guardada");
-    } catch (cause) { showToast(cause instanceof Error ? cause.message : "No se pudo guardar"); } finally { setBusy(false); }
+    } catch (cause) { if (cause instanceof ReauthRedirect) return; showToast(cause instanceof Error ? cause.message : "No se pudo guardar"); } finally { setBusy(false); }
   };
   return <section className="panel payment-settings-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="bank" /></span><div><h2>Bancos para transferencias</h2><p>El cliente escoge una cuenta y esa selección queda vinculada al pago</p></div></div><button className="secondary-action" onClick={() => setValues(blank)}>Agregar banco</button></div><div className="bank-admin-list">{accounts.map((account) => <button key={account.id} className={!account.isActive ? "inactive" : ""} onClick={() => setValues(account)}><strong>{account.label}</strong><span>{account.bankName} · {account.accountType} · {account.accountNumber}</span><em>{account.isActive ? "Activo" : "Oculto"}</em></button>)}</div><div className="admin-inline-form">
     {[['label','Nombre visible'],['bankName','Banco'],['accountHolder','Titular'],['accountNumber','Número de cuenta'],['accountType','Tipo de cuenta'],['instructions','Instrucciones opcionales']].map(([key,label]) => <label key={key}><span>{label}</span><input value={String(values[key as keyof AdminBank] ?? "")} onChange={(event) => setValues((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
@@ -552,9 +566,9 @@ function StaffAccessPanel({ showToast }: { showToast: (message: string) => void 
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ displayName, email, role }),
       });
       const payload = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "No se pudo crear la invitación");
+      if (!response.ok) { throwIfReauthRequired(response, payload); throw new Error(payload.error ?? "No se pudo crear la invitación"); }
       setDisplayName(""); setEmail(""); await loadStaff(); showToast("Acceso creado; se activará al ingresar con ese correo");
-    } catch (cause) { showToast(cause instanceof Error ? cause.message : "No se pudo crear la invitación"); } finally { setBusy(false); }
+    } catch (cause) { if (cause instanceof ReauthRedirect) return; showToast(cause instanceof Error ? cause.message : "No se pudo crear la invitación"); } finally { setBusy(false); }
   };
   return <section className="panel staff-access-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="user" /></span><div><h2>Accesos del personal</h2><p>Solo las personas que invites reciben rol de Administración, Cocina o Entrega</p></div></div><span className="safe-chip">{staff.length} autorizados</span></div><div className="staff-list">{staff.map((person) => <article key={person.id}><div><strong>{person.display_name}</strong><span>{person.email}</span></div><em>{person.roles.split(",").join(" · ")}</em><small>{person.status === "active" ? "Activo" : "Invitado"}</small></article>)}</div><div className="admin-inline-form staff-invite-form"><label><span>Nombre</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label><label><span>Correo autorizado</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Rol</span><select value={role} onChange={(event) => setRole(event.target.value as typeof role)}><option value="kitchen">Cocina</option><option value="delivery">Entrega</option><option value="admin">Administrador</option></select></label><button disabled={busy || displayName.trim().length < 2 || !email.includes("@")} onClick={() => void invite()}>{busy ? "Creando…" : "Crear invitación"}</button></div><p className="panel-footnote">El acceso por PIN para dispositivos compartidos de cocina se configurará cuando definamos el equipo; no usaremos un PIN global compartido.</p></section>;
 }

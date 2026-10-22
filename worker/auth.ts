@@ -19,6 +19,7 @@ const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
 const SESSION_SECONDS = 60 * 60 * 24 * 7;
 const OAUTH_STATE_SECONDS = 10 * 60;
+const FRESH_SESSION_WINDOW = "-30 minutes";
 
 type AuthEnv = Env & { GOOGLE_CLIENT_SECRET?: string };
 export type PipiroRole = "customer" | "admin" | "kitchen" | "delivery";
@@ -28,6 +29,8 @@ export type RequestActor = {
   user: { id: string; email: string; display_name: string; locale: string };
   roles: string[];
   demo: boolean;
+  /** False once the session is older than FRESH_SESSION_WINDOW; gates high-risk admin actions via requireFreshAuth. */
+  sessionFresh: boolean;
 };
 type LoginStateRow = { code_verifier: string; nonce_hash: string; return_to: string; expires_at: number };
 type GoogleClaims = {
@@ -211,23 +214,30 @@ export async function resolveSession(request: Request, env: Env, url: URL): Prom
   tokenHash: string;
   user: { id: string; email: string; display_name: string; locale: string };
   roles: string[];
+  fresh: boolean;
 } | null> {
   const cookies = cookieMap(request);
   const token = cookies.get(authCookieName(url, "session")) ?? cookies.get("pipiro_session");
   if (!token || token.length < 32 || token.length > 200) return null;
   const tokenHash = await sha256(token);
   const user = await env.DB.prepare(
-    `SELECT u.id, u.email, u.display_name, u.locale FROM auth_sessions s
+    `SELECT u.id, u.email, u.display_name, u.locale, (s.created_at > datetime('now', ?)) AS fresh FROM auth_sessions s
      JOIN app_users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ? AND u.status = 'active' LIMIT 1`,
-  ).bind(tokenHash, Math.floor(Date.now() / 1000)).first<{ id: string; email: string; display_name: string; locale: string }>();
+  ).bind(FRESH_SESSION_WINDOW, tokenHash, Math.floor(Date.now() / 1000))
+    .first<{ id: string; email: string; display_name: string; locale: string; fresh: number }>();
   if (!user) return null;
   const roles = await env.DB.prepare("SELECT role FROM user_roles WHERE user_id = ?").bind(user.id).all<{ role: string }>();
   // Keep "last seen" useful for the sessions list without writing on every request.
   await env.DB.prepare(
     "UPDATE auth_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND last_seen_at < datetime('now', ?)",
   ).bind(tokenHash, `-${LAST_SEEN_REFRESH_SECONDS} seconds`).run();
-  return { tokenHash, user, roles: roles.results.map((role) => role.role) };
+  return {
+    tokenHash,
+    user: { id: user.id, email: user.email, display_name: user.display_name, locale: user.locale },
+    roles: roles.results.map((role) => role.role),
+    fresh: Boolean(user.fresh),
+  };
 }
 
 function requestOriginAllowed(request: Request, env: Env, url: URL): boolean {
@@ -251,15 +261,30 @@ export async function authorizeRequest(
     if (!allowedRoles.some((role) => session.roles.includes(role))) {
       return { actor: null, response: authJson({ error: "No tienes permiso para esta sección" }, { status: 403 }) };
     }
-    return { actor: { userId: session.user.id, user: session.user, roles: session.roles, demo: false }, response: null };
+    return { actor: { userId: session.user.id, user: session.user, roles: session.roles, demo: false, sessionFresh: session.fresh }, response: null };
   }
   if (env.DEMO_MODE === "true" && isPrivateDemoHost(url.hostname)) {
     const user = await env.DB.prepare(
       "SELECT id, email, display_name, locale FROM app_users WHERE id = ? LIMIT 1",
     ).bind(demoUserId).first<{ id: string; email: string; display_name: string; locale: string }>();
-    if (user) return { actor: { userId: user.id, user, roles: allowedRoles, demo: true }, response: null };
+    if (user) return { actor: { userId: user.id, user, roles: allowedRoles, demo: true, sessionFresh: true }, response: null };
   }
   return { actor: null, response: authJson({ error: "Debes iniciar sesión" }, { status: 401 }) };
+}
+
+/**
+ * Gates high-risk admin actions (granting privileged roles, approving/cancelling payments,
+ * changing payout bank details) behind a recently-created session. There's no password to
+ * re-prompt for (login is Google or email OTP), so "fresh" means the session itself — the
+ * actual sign-in — happened within FRESH_SESSION_WINDOW; otherwise the client must sign in
+ * again (which creates a new session and clears this check) before the action proceeds.
+ */
+export function requireFreshAuth(actor: RequestActor): Response | null {
+  if (actor.demo || actor.sessionFresh) return null;
+  return authJson({
+    error: "reauth_required",
+    message: "Por seguridad, vuelve a iniciar sesión para confirmar esta acción.",
+  }, { status: 401 });
 }
 
 export async function authorizeSurface(request: Request, env: Env, url: URL, roles: PipiroRole[]): Promise<Response | null> {

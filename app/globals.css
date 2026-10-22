@@ -161,6 +161,7 @@ input:focus-visible {
 .email-login-back { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 12px; font-weight: 700; padding: 4px; text-align: center; }
 .email-login-hint { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 0; }
 .login-error { background: #fff0f0; border-radius: 10px; color: var(--danger); font-size: 12px; margin: 0 0 14px; padding: 11px; }
+.login-notice { background: #eef3fb; border-radius: 10px; color: #2c3a57; font-size: 12px; margin: 0 0 14px; padding: 11px; }
 .login-legal { color: var(--muted); font-size: 10px; line-height: 1.45; margin: 18px 0 8px; text-align: center; }
 .login-legal a { color: var(--blue); }
 .login-aside { background: linear-gradient(135deg, rgba(41,74,120,.82), rgba(101,139,208,.5) 55%, rgba(139,200,204,.34)), url('/pipiro-fondo.png') center/cover; display: flex; min-height: 100vh; padding: 70px; }

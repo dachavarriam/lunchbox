@@ -312,7 +312,8 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
   if (env.DEMO_MODE !== "true") return cmsJson({ error: "Demo mode disabled" }, { status: 404 });
   const authorization = await authorizeRequest(request, env, url, ["admin"], "user_admin_dachavarriam");
   if (authorization.response || !authorization.actor) return authorization.response;
-  const actorUserId = authorization.actor.userId;
+  const actor = authorization.actor;
+  const actorUserId = actor.userId;
 
   if (request.method === "GET" && url.pathname === "/api/demo/admin/cms") {
     const start = url.searchParams.get("start") ?? new Date().toISOString().slice(0, 10);
@@ -367,6 +368,8 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
   }
 
   if (request.method === "POST" && url.pathname === "/api/demo/admin/payment-settings") {
+    const freshAuthResponse = requireFreshAuth(actor);
+    if (freshAuthResponse) return freshAuthResponse;
     const body = await boundedJson(request);
     if (!isRecord(body)) return cmsJson({ error: "Configuración inválida" }, { status: 400 });
     const label = requiredText(body.label, 100);
@@ -391,6 +394,8 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
 
   const bankMatch = url.pathname.match(/^\/api\/demo\/admin\/payment-settings\/([^/]+)$/);
   if (request.method === "PATCH" && bankMatch) {
+    const freshAuthResponse = requireFreshAuth(actor);
+    if (freshAuthResponse) return freshAuthResponse;
     const body = await boundedJson(request);
     if (!isRecord(body)) return cmsJson({ error: "Configuración inválida" }, { status: 400 });
     const label = requiredText(body.label, 100); const bankName = requiredText(body.bankName, 100);
@@ -438,6 +443,10 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     const email = body.email.trim().toLocaleLowerCase("en-US");
     const displayName = body.displayName.trim();
     const role = String(body.role);
+    if (role === "admin" || role === "kitchen") {
+      const freshAuthResponse = requireFreshAuth(actor);
+      if (freshAuthResponse) return freshAuthResponse;
+    }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || displayName.length < 2 || displayName.length > 120) {
       return cmsJson({ error: "Completa un nombre y correo válidos" }, { status: 400 });
     }
@@ -487,6 +496,8 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
 
   const batchReviewMatch = url.pathname.match(/^\/api\/demo\/admin\/payment-batches\/([^/]+)$/);
   if (request.method === "PATCH" && batchReviewMatch) {
+    const freshAuthResponse = requireFreshAuth(actor);
+    if (freshAuthResponse) return freshAuthResponse;
     const body = await boundedJson(request);
     if (!isRecord(body) || !["approved", "rejected", "amount_mismatch"].includes(String(body.status))) {
       return cmsJson({ error: "Estado inválido" }, { status: 400 });
@@ -566,6 +577,10 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     const body = await boundedJson(request);
     if (!isRecord(body) || !["request_receipt", "remind_receipt", "cancel"].includes(String(body.action))) {
       return cmsJson({ error: "Acción inválida" }, { status: 400 });
+    }
+    if (body.action === "cancel") {
+      const freshAuthResponse = requireFreshAuth(actor);
+      if (freshAuthResponse) return freshAuthResponse;
     }
     const payment = await env.DB.prepare(
       `SELECT pb.id, pb.checkout_number, pb.guardian_user_id, pb.status, pb.receipt_object_key,
@@ -821,4 +836,4 @@ export async function handlePublicMedia(request: Request, env: Env, url: URL): P
   headers.set("ETag", object.httpEtag);
   return new Response(object.body, { headers });
 }
-import { authorizeRequest } from "./auth";
+import { authorizeRequest, requireFreshAuth } from "./auth";

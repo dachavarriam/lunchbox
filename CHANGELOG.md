@@ -26,6 +26,15 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
   Archivos: `migrations/0021_email_otp_codes.sql` (nuevo), `worker/auth.ts` (`/api/auth/email/start`, `/api/auth/email/verify`), `worker/email.ts` (plantillas dinámicas), `worker/index.ts` (`ctx` pasado a `handleAuthApi`), `app/use-turnstile.ts` (nuevo), `app/email-login-form.tsx` (nuevo), `app/login-methods.tsx` (nuevo), `app/google-login-button.tsx`, `app/login/page.tsx`, `app/globals.css`.
 - `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
 
+### 2026-10-22 (continuación 6) — reautenticación para acciones de Admin de alto riesgo
+
+- **feat(seguridad):** las sesiones de Admin duran 7 días, pero un puñado de acciones especialmente sensibles ahora exige que el *login* (no solo la sesión) haya ocurrido en los últimos 30 minutos — si no, el servidor responde `401 { error: "reauth_required" }` y el panel manda al administrador de vuelta a `/login` (Google u OTP) antes de dejarlo continuar; al volver a entrar se crea una sesión nueva y la acción ya puede completarse. No hay contraseña que re-pedir (el login es Google o el OTP por correo recién construido), así que "reautenticar" aquí significa "sesión reciente", no "vuelve a escribir tu clave".
+  - Acciones cubiertas: invitar personal con rol `admin` o `kitchen` (no `delivery`, que es de menor privilegio), aprobar/rechazar/marcar discrepancia en pagos, cancelar un pago/pedido, y crear o editar una cuenta bancaria para transferencias.
+  - `resolveSession` ahora calcula `fresh` directamente en SQL (`auth_sessions.created_at > datetime('now', '-30 minutes')`); el bypass de modo demo (solo hosts privados) se considera siempre "fresco" porque no hay sesión real que expirar.
+  - Verificado en vivo contra D1 local: con una sesión de prueba de 2 horas de antigüedad, las 4 acciones de alto riesgo devuelven `401 reauth_required`; tras refrescar `created_at` a "ahora", las mismas peticiones tienen éxito; invitar con rol `delivery` nunca pide reautenticación; una lectura normal (`GET /api/demo/admin/staff`) nunca se bloquea.
+  Archivos: `worker/auth.ts` (`requireFreshAuth`, `resolveSession`), `worker/cms.ts` (los 5 puntos de inserción), `app/admin-view.tsx` (`throwIfReauthRequired`, redirección a `/login`), `app/login/page.tsx`, `app/globals.css` (`.login-notice`).
+- `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
 ### 2026-10-22
 
 - **fix(service-worker):** el service worker ya no cachea respuestas de `/api/*`. Antes guardaba en Cache Storage cualquier GET exitoso del mismo origen, incluyendo datos de alergias y estudiantes (`/api/demo/bootstrap`), analíticas de Administración y las imágenes de comprobantes de pago. Ahora solo se cachean el app shell estático (`/`, `/manifest.webmanifest`, íconos) y los bundles compilados bajo `/assets/`. Se incrementó la versión de caché (`v6` → `v7`) para forzar, en el siguiente arranque, la purga de cualquier dato sensible que ya estuviera cacheado en dispositivos existentes.
@@ -82,7 +91,6 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
 
 ### Pendiente / próximos pasos identificados (no implementados todavía)
 
-- Reautenticación para acciones de Admin de alto riesgo (step-up auth) — todavía no implementada.
 - El rol `delivery` ya existe (se puede invitar personal con ese rol) pero no tiene ninguna pantalla asociada; tampoco hay evidencia fotográfica de entrega en el punto de recolección.
 - CSV import real (hoy solo hay un parser del lado del cliente en el prototipo).
 - Integración Cybersource/BAC, impresión de etiquetas/comandas, etc.

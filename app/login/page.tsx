@@ -15,8 +15,8 @@ const errorMessages: Record<string, string> = {
   turnstile_failed: "No pudimos confirmar que eres una persona. Inténtalo de nuevo.",
 };
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; returnTo?: string }> }) {
-  const { error, returnTo } = await searchParams;
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ error?: string; returnTo?: string; notice?: string }> }) {
+  const { error, returnTo, notice } = await searchParams;
   const safeReturnTo = returnTo?.startsWith("/") && !returnTo.startsWith("//") ? returnTo : "/";
   return (
     <main className="login-page">
@@ -30,6 +30,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <p>Administra tus estudiantes, pedidos, comprobantes y entregas desde un solo lugar.</p>
         </div>
         {error && <p className="login-error" role="alert">{errorMessages[error] ?? "No se pudo completar el acceso."}</p>}
+        {!error && notice === "reauth" && <p className="login-notice">Por seguridad, confirma tu identidad para continuar con esa acción.</p>}
         <LoginMethods returnTo={safeReturnTo} />
         <p className="login-legal">Al continuar aceptas los <Link href="/terminos">términos</Link> y el <Link href="/privacidad">aviso de privacidad</Link> de Pipiro.</p>
       </section>
