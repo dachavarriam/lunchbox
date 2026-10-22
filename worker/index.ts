@@ -1146,13 +1146,15 @@ function contentSecurityPolicy(env: Env): string {
   // hydration (inline bootstrap scripts carry per-request RSC payload data, so
   // they can't be hashed or moved to a static file) and by React's inline
   // style={{...}} usage. challenges.cloudflare.com is Turnstile's widget/iframe.
-  // static.cloudflareinsights.com/beacon.min.js is Cloudflare Web Analytics,
-  // auto-injected by the zone; its beacon posts to our own /cdn-cgi/rum, which
-  // connect-src 'self' already covers.
+  // static.cloudflareinsights.com is Cloudflare Web Analytics, auto-injected by
+  // the zone under /beacon.min.js/<token> (the token is a path segment, not a
+  // query string, and CSP path matching is exact — so the whole origin is
+  // allowed rather than one exact, non-wildcardable path). Its beacon posts to
+  // our own /cdn-cgi/rum, which connect-src 'self' already covers.
   const mediaOrigin = (() => { try { return new URL(env.PUBLIC_MEDIA_BASE_URL).origin; } catch { return null; } })();
   return [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com/beacon.min.js",
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com",
     "style-src 'self' 'unsafe-inline'",
     `img-src 'self' data:${mediaOrigin ? ` ${mediaOrigin}` : ""}`,
     "font-src 'self'",
