@@ -10,6 +10,7 @@ dist/
 .vinext/
 .env*
 !.env.example
+.dev.vars*
 backups/
 outputs/
 .DS_Store

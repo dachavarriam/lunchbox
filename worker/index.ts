@@ -796,10 +796,11 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
       if (!owned) return json({ error: "Pedido no encontrado" }, { status: 404 });
     }
     const id = crypto.randomUUID();
+    const subject = body.subject.trim();
     await env.DB.prepare(
       `INSERT INTO support_requests (id, user_id, order_id, category, subject, message)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).bind(id, actorUserId, body.orderId ?? null, body.category, body.subject.trim(), body.message.trim()).run();
+    ).bind(id, actorUserId, body.orderId ?? null, body.category, subject, body.message.trim()).run();
     const admins = await env.DB.prepare(
       `SELECT DISTINCT u.id, u.email FROM app_users u JOIN user_roles ur ON ur.user_id = u.id
        WHERE ur.role = 'admin' AND u.status = 'active'`,
@@ -808,7 +809,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
       env.DB.prepare("INSERT INTO notifications (id, user_id, order_id, channel, template_key) VALUES (?, ?, ?, 'in_app', 'support_request_created')")
         .bind(crypto.randomUUID(), admin.id, body.orderId ?? null),
       env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, ?, ?, 'email', 'support_request_created', ?)")
-        .bind(crypto.randomUUID(), admin.id, body.orderId ?? null, admin.email, JSON.stringify({ supportRequestId: id, subject: body.subject.trim() })),
+        .bind(crypto.randomUUID(), admin.id, body.orderId ?? null, admin.email, JSON.stringify({ supportRequestId: id, subject })),
     ]));
     return json({ id, status: "open" }, { status: 201 });
   }
