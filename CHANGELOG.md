@@ -16,6 +16,19 @@ Registro de trabajo de seguridad/privacidad (rama `security-upgrades`, ya fusion
   Archivos: `migrations/0022_delivery_confirmations.sql` (nuevo), `worker/index.ts` (`/api/demo/delivery/confirm`, roles de `/cocina` y `/api/demo/kds`), `worker/cms.ts` (`/api/demo/admin/delivery-confirmations*`), `app/kitchen-view.tsx` (`DeliveryView`), `app/prototype-app.tsx` (`confirmDelivery`, selección de vista por rol), `app/admin-view.tsx` (`DeliveryConfirmationsPanel`), `app/globals.css`.
 - `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos (1 warning preexistente de estilo de Next.js por usar `<img>` para la vista previa local de la foto, correcto en este caso ya que es un blob del propio dispositivo, no una imagen remota optimizable).
 
+### 2026-10-22 (continuación) — fix: la foto de entrega es por pedido, no por lote
+
+- El diseño original (arriba) confirmaba la entrega de **todos** los pedidos empacados del día con **una sola foto compartida** — igual que ya hacía `kds/deliver-all`. Al revisarlo en vivo con el usuario, quedó claro que eso no sirve: dos hermanos del mismo salón (el caso real de prueba) quedaban con la misma foto genérica, que no prueba nada por pedido individual ni se le puede mostrar a cada familia como comprobante de SU pedido.
+  **Corregido:** ahora cada pedido empacado se confirma —y se fotografía— por separado.
+  - `delivery_confirmations` pasó de "una fila por lote con lista de IDs" a **una fila por pedido** (`order_id UNIQUE`).
+  - El endpoint cambió de `POST /api/demo/delivery/confirm` (lote) a `POST /api/demo/delivery/confirm/:orderId` (un pedido, valida que esté `packed` y con pago aprobado, 404/409 si no).
+  - La pantalla de Entrega (`DeliveryView`) ahora es una tarjeta por pedido, cada una con su propio "Tomar foto" + "Confirmar entrega" — no un botón único para todo el lote.
+  - **Nuevo:** `GET /api/demo/orders/:id/delivery-photo`, acotado al `guardian_user_id` del pedido, para que la familia vea la foto de la entrega de *su propio* pedido desde "Mis pedidos" (enlace "Ver foto de entrega" cuando `status === 'delivered'`). Sirve tanto como comprobante para el padre como de referencia si hay un reclamo después.
+  - El panel de Admin ("Evidencia de entregas") ahora muestra el número de pedido y el nombre del estudiante en vez de un conteo de lote.
+  - Verificado en vivo de nuevo con los dos hermanos de prueba: confirmé la entrega de uno con una foto — el otro quedó intacto (`packed`), con su propia tarjeta esperando su propia foto. Confirmé que el padre ve `has_delivery_photo: true` solo en el pedido ya confirmado, que puede descargar exactamente esos bytes desde `/api/demo/orders/:id/delivery-photo`, y que un padre *distinto* (sesión real, no relacionado con ese pedido) recibe 404 al intentar verla — no revela ni que existe.
+  Archivos: `migrations/0022_delivery_confirmations.sql` (reescrita antes de compartirse), `worker/index.ts`, `worker/cms.ts`, `app/kitchen-view.tsx`, `app/prototype-app.tsx`, `app/admin-view.tsx`, `app/pipiro-shared.tsx`, `app/globals.css`.
+- `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
 ## [Unreleased] — rama `security-upgrades` (fusionada a `main`)
 
 ### 2026-10-22 (continuación 4) — primer despliegue real y ajustes post-deploy

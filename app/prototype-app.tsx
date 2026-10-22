@@ -498,14 +498,16 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
     showToast(payload.delivered ? `${payload.delivered} pedidos marcados como entregados` : "No hay pedidos empacados pendientes");
   };
 
-  const confirmDelivery = async (photo: File) => {
+  const confirmDelivery = async (id: string, photo: File) => {
+    const order = kdsOrders.find((candidate) => candidate.id === id);
+    if (!order?.backendId) { showToast("No se pudo confirmar la entrega"); return; }
     const form = new FormData();
     form.append("photo", photo);
-    const response = await fetch("/api/demo/delivery/confirm", { method: "POST", body: form });
-    const payload = await response.json() as { delivered?: number; error?: string };
+    const response = await fetch(`/api/demo/delivery/confirm/${order.backendId}`, { method: "POST", body: form });
+    const payload = await response.json() as { error?: string };
     if (!response.ok) { showToast(payload.error ?? "No se pudo confirmar la entrega"); return; }
     await refreshDemoOrders();
-    showToast(payload.delivered ? `${payload.delivered} pedidos entregados con evidencia fotográfica` : "No hay pedidos empacados pendientes");
+    showToast("Entrega confirmada con evidencia fotográfica");
   };
 
   const reviewNotifications = async () => {
@@ -1526,6 +1528,9 @@ function OrderHistoryDialog({ orders, issues, close, refreshed }: { orders: Demo
                 <ReceiptUploader orderId={order.id} paymentId={order.payment_batch_id ?? undefined} batch={Boolean(order.payment_batch_id)} compact onUploaded={refreshed} />
               )}
               {order.payment_status === "under_review" && <div className="history-payment-state">Comprobante enviado · en revisión</div>}
+              {order.status === "delivered" && Boolean(order.has_delivery_photo) && (
+                <a className="history-delivery-photo" href={`/api/demo/orders/${order.id}/delivery-photo`} target="_blank" rel="noreferrer">Ver foto de entrega</a>
+              )}
               {["submitted", "confirmed"].includes(order.status) && <button className="history-cancel" onClick={() => void cancelOrder(order)}>Cancelar pedido</button>}
             </article>
           ))}

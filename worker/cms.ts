@@ -477,8 +477,12 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
 
   if (request.method === "GET" && url.pathname === "/api/demo/admin/delivery-confirmations") {
     const confirmations = await env.DB.prepare(
-      `SELECT dc.id, dc.order_count, dc.created_at, u.display_name AS delivered_by
-       FROM delivery_confirmations dc JOIN app_users u ON u.id = dc.delivered_by_user_id
+      `SELECT dc.id, dc.created_at, u.display_name AS delivered_by, o.order_number,
+              s.first_name || ' ' || s.last_name AS student_name
+       FROM delivery_confirmations dc
+       JOIN app_users u ON u.id = dc.delivered_by_user_id
+       JOIN orders o ON o.id = dc.order_id
+       JOIN students s ON s.id = o.student_id
        ORDER BY dc.created_at DESC LIMIT 50`,
     ).all();
     return cmsJson({ confirmations: confirmations.results });

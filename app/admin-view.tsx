@@ -575,7 +575,7 @@ function StaffAccessPanel({ showToast }: { showToast: (message: string) => void 
 }
 
 function DeliveryConfirmationsPanel() {
-  type DeliveryConfirmation = { id: string; order_count: number; created_at: string; delivered_by: string };
+  type DeliveryConfirmation = { id: string; order_number: string; student_name: string; created_at: string; delivered_by: string };
   const [confirmations, setConfirmations] = useState<DeliveryConfirmation[]>([]);
   useEffect(() => {
     const controller = new AbortController();
@@ -585,7 +585,7 @@ function DeliveryConfirmationsPanel() {
     return () => controller.abort();
   }, []);
   const dateFormat = new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short" });
-  return <section className="panel delivery-confirmations-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="check" /></span><div><h2>Evidencia de entregas</h2><p>Fotos confirmando la entrega en el punto de recolección</p></div></div><span className="safe-chip">{confirmations.length} registradas</span></div><div className="delivery-confirmations-list">{confirmations.map((confirmation) => <article key={confirmation.id}><div><strong>{confirmation.order_count} pedido(s)</strong><span>{confirmation.delivered_by} · {dateFormat.format(new Date(confirmation.created_at))}</span></div><a href={`/api/demo/admin/delivery-confirmations/${confirmation.id}/photo`} target="_blank" rel="noreferrer">Ver foto</a></article>)}{!confirmations.length && <div className="empty-transfer">Aún no hay entregas confirmadas con foto.</div>}</div></section>;
+  return <section className="panel delivery-confirmations-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="check" /></span><div><h2>Evidencia de entregas</h2><p>Fotos confirmando la entrega en el punto de recolección</p></div></div><span className="safe-chip">{confirmations.length} registradas</span></div><div className="delivery-confirmations-list">{confirmations.map((confirmation) => <article key={confirmation.id}><div><strong>{confirmation.order_number} · {confirmation.student_name}</strong><span>{confirmation.delivered_by} · {dateFormat.format(new Date(confirmation.created_at))}</span></div><a href={`/api/demo/admin/delivery-confirmations/${confirmation.id}/photo`} target="_blank" rel="noreferrer">Ver foto</a></article>)}{!confirmations.length && <div className="empty-transfer">Aún no hay entregas confirmadas con foto.</div>}</div></section>;
 }
 
 type AdminSupportRequest = SupportRequest & { display_name: string; order_number: string | null };

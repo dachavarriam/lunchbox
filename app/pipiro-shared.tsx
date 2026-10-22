@@ -130,6 +130,7 @@ export type DemoOrder = {
   ready_at: string | null;
   packed_at: string | null;
   print_jobs_queued: number;
+  has_delivery_photo: number;
 };
 
 export type CreatedOrder = {

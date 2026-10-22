@@ -69,6 +69,7 @@ type DemoOrderRow = {
   ready_at: string | null;
   packed_at: string | null;
   print_jobs_queued: number;
+  has_delivery_photo: number;
 };
 
 type OrderItemInput = {
@@ -271,6 +272,7 @@ async function loadDemoOrders(env: Env, actorUserId: string | null): Promise<Dem
             (SELECT MIN(ose.created_at) FROM order_status_events ose WHERE ose.order_id = o.id AND ose.to_status = 'ready') AS ready_at,
             (SELECT MIN(ose.created_at) FROM order_status_events ose WHERE ose.order_id = o.id AND ose.to_status = 'packed') AS packed_at,
             (SELECT COUNT(*) FROM print_jobs pj WHERE pj.order_id = o.id AND pj.status IN ('queued', 'printing', 'printed')) AS print_jobs_queued,
+            CASE WHEN EXISTS (SELECT 1 FROM delivery_confirmations dc WHERE dc.order_id = o.id) THEN 1 ELSE 0 END AS has_delivery_photo,
             COALESCE(pb.status, pt.status, 'pending') AS payment_status,
             COALESCE(pb.payment_method, pt.payment_method, 'bank_transfer') AS payment_method,
             COALESCE(pb.customer_reference, pt.customer_reference) AS customer_reference,
@@ -309,7 +311,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
 
   const kdsReadRequest = url.pathname === "/api/demo/kds";
   const kitchenWriteRequest = url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/orders\/[^/]+\/(status|print)$/.test(url.pathname);
-  const deliveryWriteRequest = url.pathname === "/api/demo/delivery/confirm";
+  const deliveryWriteRequest = /^\/api\/demo\/delivery\/confirm\/[^/]+$/.test(url.pathname);
   const kitchenRequest = kdsReadRequest || kitchenWriteRequest || deliveryWriteRequest;
   const adminBootstrapRequest = url.pathname === "/api/demo/bootstrap" &&
     (requestSurface(url, env) === "admin" || (requestSurface(url, env) === null && url.searchParams.get("surface") === "admin"));
@@ -333,7 +335,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
       { test: () => url.pathname === "/api/demo/support", bucket: "support", limit: 5 },
       { test: () => /^\/api\/demo\/payment-batches\/[^/]+\/receipt$/.test(url.pathname), bucket: "receipt", limit: 10 },
       { test: () => /^\/api\/demo\/payments\/[^/]+\/receipt$/.test(url.pathname), bucket: "receipt", limit: 10 },
-      { test: () => url.pathname === "/api/demo/delivery/confirm", bucket: "delivery_confirm", limit: 10 },
+      { test: () => /^\/api\/demo\/delivery\/confirm\/[^/]+$/.test(url.pathname), bucket: "delivery_confirm", limit: 20 },
     ].find((route) => route.test());
     if (sensitiveRoute) {
       const rateLimit = await checkRateLimit(env, `${sensitiveRoute.bucket}:${actorUserId}`, sensitiveRoute.limit, 10 * 60);
@@ -947,17 +949,15 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
     return json({ ok: true, delivered: rows.results.length });
   }
 
-  if (request.method === "POST" && url.pathname === "/api/demo/delivery/confirm") {
-    const rows = await env.DB.prepare(
-      `SELECT o.id, o.guardian_user_id FROM orders o JOIN menu_days md ON md.id = o.menu_day_id
+  const deliveryConfirmMatch = url.pathname.match(/^\/api\/demo\/delivery\/confirm\/([^/]+)$/);
+  if (request.method === "POST" && deliveryConfirmMatch) {
+    const order = await env.DB.prepare(
+      `SELECT o.id, o.guardian_user_id, o.status FROM orders o
        JOIN payment_batch_orders pbo ON pbo.order_id = o.id JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
-       WHERE pb.status = 'approved' AND o.status = 'packed' AND md.service_date = (
-         SELECT MIN(md2.service_date) FROM orders o2 JOIN menu_days md2 ON md2.id = o2.menu_day_id
-         JOIN payment_batch_orders pbo2 ON pbo2.order_id = o2.id JOIN payment_batches pb2 ON pb2.id = pbo2.payment_batch_id
-         WHERE pb2.status = 'approved' AND o2.status = 'packed'
-       )`,
-    ).all<{ id: string; guardian_user_id: string }>();
-    if (!rows.results.length) return json({ ok: true, delivered: 0 });
+       WHERE o.id = ? AND pb.status = 'approved' LIMIT 1`,
+    ).bind(deliveryConfirmMatch[1]).first<{ id: string; guardian_user_id: string; status: string }>();
+    if (!order) return json({ error: "Pedido no encontrado" }, { status: 404 });
+    if (order.status !== "packed") return json({ error: "Este pedido ya no está listo para entrega" }, { status: 409 });
 
     const contentLength = Number(request.headers.get("content-length") ?? "0");
     if (contentLength > 6_000_000) return json({ error: "La foto debe pesar menos de 5 MB" }, { status: 413 });
@@ -968,27 +968,38 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
     }
     const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic", "image/heif": "heif" };
     const confirmationId = crypto.randomUUID();
-    const objectKey = `delivery-photos/${confirmationId}.${extensions[photo.type]}`;
+    const objectKey = `delivery-photos/${order.id}/${confirmationId}.${extensions[photo.type]}`;
     await env.PAYMENT_RECEIPTS.put(objectKey, photo.stream(), {
-      httpMetadata: { contentType: photo.type }, customMetadata: { confirmationId, purpose: "delivery-photo" },
+      httpMetadata: { contentType: photo.type }, customMetadata: { orderId: order.id, purpose: "delivery-photo" },
     });
-    const orderIds = rows.results.map((order) => order.id);
     await env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO delivery_confirmations (id, delivered_by_user_id, photo_object_key, photo_content_type, order_count, order_ids_json)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).bind(confirmationId, actorUserId, objectKey, photo.type, orderIds.length, JSON.stringify(orderIds)),
-      ...rows.results.flatMap((order) => [
-        env.DB.prepare("UPDATE orders SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'packed'").bind(order.id),
-        env.DB.prepare(
-          "INSERT INTO order_status_events (id, order_id, from_status, to_status, actor_user_id, note) VALUES (?, ?, 'packed', 'delivered', ?, 'Entrega confirmada con evidencia fotográfica')",
-        ).bind(crypto.randomUUID(), order.id, actorUserId),
-        env.DB.prepare("INSERT INTO notifications (id, user_id, order_id, channel, template_key) VALUES (?, ?, ?, 'in_app', 'order_delivered')").bind(crypto.randomUUID(), order.guardian_user_id, order.id),
-        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
-        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'push', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
-      ]),
+        `INSERT INTO delivery_confirmations (id, order_id, delivered_by_user_id, photo_object_key, photo_content_type)
+         VALUES (?, ?, ?, ?, ?)`,
+      ).bind(confirmationId, order.id, actorUserId, objectKey, photo.type),
+      env.DB.prepare("UPDATE orders SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'packed'").bind(order.id),
+      env.DB.prepare(
+        "INSERT INTO order_status_events (id, order_id, from_status, to_status, actor_user_id, note) VALUES (?, ?, 'packed', 'delivered', ?, 'Entrega confirmada con evidencia fotográfica')",
+      ).bind(crypto.randomUUID(), order.id, actorUserId),
+      env.DB.prepare("INSERT INTO notifications (id, user_id, order_id, channel, template_key) VALUES (?, ?, ?, 'in_app', 'order_delivered')").bind(crypto.randomUUID(), order.guardian_user_id, order.id),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
+      env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'push', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
     ]);
-    return json({ ok: true, delivered: rows.results.length, confirmationId });
+    return json({ ok: true, orderId: order.id, confirmationId });
+  }
+
+  const deliveryPhotoViewMatch = url.pathname.match(/^\/api\/demo\/orders\/([^/]+)\/delivery-photo$/);
+  if (request.method === "GET" && deliveryPhotoViewMatch) {
+    const confirmation = await env.DB.prepare(
+      `SELECT dc.photo_object_key, dc.photo_content_type FROM delivery_confirmations dc
+       JOIN orders o ON o.id = dc.order_id WHERE dc.order_id = ? AND o.guardian_user_id = ? LIMIT 1`,
+    ).bind(deliveryPhotoViewMatch[1], actorUserId).first<{ photo_object_key: string; photo_content_type: string }>();
+    if (!confirmation) return json({ error: "No hay evidencia de entrega para este pedido" }, { status: 404 });
+    const object = await env.PAYMENT_RECEIPTS.get(confirmation.photo_object_key);
+    if (!object) return json({ error: "No hay evidencia de entrega para este pedido" }, { status: 404 });
+    return new Response(object.body, {
+      headers: { "Cache-Control": "private, no-store", "Content-Type": confirmation.photo_content_type, "X-Content-Type-Options": "nosniff" },
+    });
   }
 
   return json({ error: "Not found" }, { status: 404 });
@@ -1266,7 +1277,7 @@ const worker = {
         if (access) return access;
       }
       const dispatchNotificationsImmediately = request.method !== "GET" &&
-        (url.pathname === "/api/demo/kds/deliver-all" || url.pathname === "/api/demo/delivery/confirm" ||
+        (url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/delivery\/confirm\/[^/]+$/.test(url.pathname) ||
           /^\/api\/demo\/admin\/(payment-batches|support)\/[^/]+(?:\/action)?$/.test(url.pathname));
       const dispatchNotifications = () => { ctx.waitUntil(processPushOutbox(env)); ctx.waitUntil(processEmailOutbox(env)); };
       const cmsResponse = await handleCmsApi(request, env, url);

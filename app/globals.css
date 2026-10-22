@@ -773,16 +773,16 @@ input:focus-visible {
 .delivery-toolbar { margin-bottom: 20px; }
 .delivery-toolbar h1 { font-size: 26px; margin: 4px 0; }
 .delivery-toolbar span { color: var(--muted); font-size: 12px; font-weight: 700; }
-.delivery-order-list { display: flex; flex-direction: column; gap: 9px; margin-bottom: 22px; }
-.delivery-ticket { background: #fff; border: 1px solid #dbe2ec; border-radius: 12px; box-shadow: 0 5px 14px rgba(23,50,88,.05); display: flex; flex-direction: column; padding: 13px; }
-.delivery-ticket span { color: var(--muted); font-size: 10px; margin-top: 3px; }
-.delivery-ticket small { color: var(--navy); font-size: 10px; margin-top: 5px; }
-.delivery-photo-card { background: #fff; border: 1px solid #dbe2ec; border-radius: 16px; padding: 18px; }
-.delivery-photo-card h2 { font-size: 16px; margin: 0 0 6px; }
-.delivery-photo-card p { color: var(--muted); font-size: 12px; margin: 0 0 14px; }
-.delivery-photo-preview { border-radius: 12px; display: block; margin-bottom: 14px; max-height: 260px; object-fit: cover; width: 100%; }
-.delivery-photo-button, .delivery-confirm-button { border-radius: 11px; font-size: 13px; font-weight: 800; padding: 13px; width: 100%; }
-.delivery-photo-button { background: #edf3f8; border: 0; color: #28465f; cursor: pointer; margin-bottom: 10px; }
+.delivery-toolbar small { color: var(--muted); display: block; font-size: 11px; margin-top: 6px; }
+.delivery-order-list { display: flex; flex-direction: column; gap: 14px; }
+.delivery-ticket { background: #fff; border: 1px solid #dbe2ec; border-radius: 16px; box-shadow: 0 5px 14px rgba(23,50,88,.05); display: flex; flex-direction: column; padding: 16px; }
+.delivery-ticket-info { display: flex; flex-direction: column; margin-bottom: 12px; }
+.delivery-ticket-info span { color: var(--muted); font-size: 10px; margin-top: 3px; }
+.delivery-ticket-info small { color: var(--navy); font-size: 10px; margin-top: 5px; }
+.delivery-photo-preview { border-radius: 12px; display: block; margin-bottom: 12px; max-height: 220px; object-fit: cover; width: 100%; }
+.delivery-ticket-actions { display: flex; gap: 8px; }
+.delivery-photo-button, .delivery-confirm-button { border-radius: 11px; font-size: 12px; font-weight: 800; padding: 12px; width: 100%; }
+.delivery-photo-button { background: #edf3f8; border: 0; color: #28465f; cursor: pointer; }
 .delivery-confirm-button { background: var(--navy); border: 0; color: #fff; cursor: pointer; }
 .delivery-confirm-button:disabled { cursor: not-allowed; opacity: .5; }
 
@@ -1027,6 +1027,7 @@ input:focus-visible {
 .admin-inline-form input { background: #f1f4f8; border: 0; border-radius: 10px; color: var(--ink); min-height: 42px; padding: 10px 12px; width: 100%; }
 .admin-inline-form button { background: var(--navy); border: 0; border-radius: 10px; color: #fff; cursor: pointer; font-size: 12px; font-weight: 800; min-height: 42px; padding: 10px 14px; }
 .history-cancel { background: transparent; border: 0; color: var(--danger); cursor: pointer; font-size: 11px; font-weight: 800; grid-column: 1 / -1; justify-self: start; padding: 6px 0 0; text-align: left; }
+.history-delivery-photo { color: var(--blue); font-size: 11px; font-weight: 800; grid-column: 1 / -1; justify-self: start; padding: 6px 0 0; }
 .payment-issue { align-items: flex-start; background: #fff1e8; border-radius: 14px; color: #8a431d; display: flex; gap: 11px; margin-bottom: 14px; padding: 13px; }
 .payment-issue > div { display: grid; flex: 1; gap: 4px; }
 .payment-issue strong { font-size: 13px; }
