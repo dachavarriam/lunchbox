@@ -26,8 +26,19 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
   Archivos: `app/pipiro-shared.tsx` (nuevo), `app/admin-view.tsx` (nuevo), `app/kitchen-view.tsx` (nuevo), `app/prototype-app.tsx`, `worker/index.ts`, `worker/auth.ts` (export de `isPrivateDemoHost`), `tests/rendered-html.test.mjs`.
 - `pnpm test` (build + suite de 6 pruebas) y `pnpm run lint` sin errores nuevos.
 
+- **feat(rate-limit):** límites de frecuencia respaldados en D1, sin configuración de Cloudflare: por IP en `/api/auth/google/start` (15/10 min), por usuario en `/api/demo/orders` (30/10 min), `/api/demo/payment-batches` (15/10 min), subida de comprobantes (10/10 min) y `/api/demo/support` (5/10 min). Contadores de ventana fija, incremento+lectura atómico en una sola sentencia SQL (`INSERT ... ON CONFLICT ... RETURNING`), verificado directamente contra D1 local. Limpieza de contadores viejos agregada al cron existente.
+  Archivos: `migrations/0019_rate_limit_counters.sql` (nuevo), `worker/rate-limit.ts` (nuevo), `worker/auth.ts`, `worker/index.ts`.
+- **feat(turnstile):** verificación server-side de Cloudflare Turnstile en `/api/auth/google/start`, detrás de `TURNSTILE_SITE_KEY`/`TURNSTILE_SECRET_KEY` — mientras no estén configuradas, se omite la verificación y el botón de Google funciona exactamente igual que antes. El sitekey se expone vía `/api/public/config` (es público por diseño) y un componente cliente nuevo carga el widget solo si hay sitekey configurado.
+  Archivos: `worker/turnstile.ts` (nuevo), `app/google-login-button.tsx` (nuevo), `app/login/page.tsx`, `app/globals.css`, `worker/auth.ts`, `worker/index.ts`, `wrangler.jsonc` (var `TURNSTILE_SITE_KEY`).
+- **feat(csp):** header `Content-Security-Policy` en todas las páginas. `script-src`/`style-src` necesitan `'unsafe-inline'` porque la hidratación SSR de este framework inyecta scripts inline con datos por-solicitud (no se pueden hashear ni mover a un archivo estático) y la app usa `style={{...}}` inline extensamente. Verificado en navegador sin violaciones en `/`, `/admin`, `/cocina`, `/login`; queda fijado con una aserción de prueba.
+  Archivos: `worker/index.ts` (`contentSecurityPolicy`, `securePageResponse`).
+- **feat(email):** procesador de `notification_outbox` para `channel = 'email'` vía Resend, igual al patrón ya usado para push. Necesita `RESEND_API_KEY` (secreto) y usa `EMAIL_FROM` (var, con un remitente de ejemplo ya configurado); sin la llave no hace nada, no rompe lo existente. Verificado con pruebas unitarias contra la implementación real: no-op sin llave, resolución de destinatario vía `user_id`, reintentos hasta agotar intentos, manejo de destinatario faltante.
+  Archivos: `worker/email.ts` (nuevo), `tests/email-outbox.test.mjs` (nuevo), `worker/index.ts`, `wrangler.jsonc` (var `EMAIL_FROM`), `package.json` (el script `test` ahora corre toda la carpeta `tests/` con `--experimental-strip-types`).
+- Ninguno de los dos secretos nuevos (`TURNSTILE_SECRET_KEY`, `RESEND_API_KEY`) se agregó a `secrets.required` en `wrangler.jsonc`, porque ambas funciones degradan sin romper nada — agregarlos ahí generaría una advertencia engañosa de "falta configurar" cuando en realidad la app sigue funcionando.
+- `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
 ### Pendiente / próximos pasos identificados (no implementados todavía)
 
-- Procesador de `notification_outbox` para `channel = 'email'` (hoy se encolan pero nunca se envían) — bloquea el login por correo (OTP) y las notificaciones por email ya diseñadas.
 - El rol `delivery` ya existe (se puede invitar personal con ese rol) pero no tiene ninguna pantalla asociada; tampoco hay evidencia fotográfica de entrega en el punto de recolección.
-- Resto de hallazgos: ver la lista priorizada acordada con el equipo (rate limiting + Turnstile, CSP, login por correo con OTP, exposición pública del número de cuenta bancaria, CSV import real, integración Cybersource/BAC, impresión de etiquetas/comandas, etc.).
+- Login por correo (OTP) todavía no implementado — ahora que existen rate limiting y Turnstile reutilizables, es el momento de construirlo sobre esa base.
+- Resto de hallazgos: exposición pública del número de cuenta bancaria, CSV import real, integración Cybersource/BAC, impresión de etiquetas/comandas, etc.
