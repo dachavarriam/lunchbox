@@ -46,17 +46,21 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
 ### 2026-10-22 (continuación 2) — vuelta a Resend; Cloudflare Email Sending requiere plan pagado
 
 - `wrangler email sending enable solomexicohn.com` falló (`Unauthorized [code: 2036]`) por el CLI; el usuario lo intentó también desde el dashboard y ahí quedó claro que **Email Sending requiere el plan Workers Paid** ($5/mes, incluye 3,000 correos/mes, luego $0.35 por cada 1,000 — [precio oficial](https://developers.cloudflare.com/email-service/platform/pricing/)). Lo que el usuario ya tenía activo (**Email Routing**, gratis) no sirve para este caso: solo recibe correo y puede reenviar a direcciones ya verificadas o responder a un correo entrante — no puede mandar un aviso nuevo a un Gmail de familia que nunca escribió primero.
-- Decisión final: **volver a Resend** (plan gratis: 3,000 correos/mes, 100/día, 1 dominio — suficiente para el piloto). Revertido `worker/email.ts` a la API REST de Resend, quitado el binding `send_email` de `wrangler.jsonc`, `EMAIL_FROM` ajustado a `pedidos@send.solomexicohn.com` (subdominio, no el dominio raíz, porque ahí ya están los MX de Email Routing — Resend también lo recomienda para aislar reputación de envío).
+- Decisión final: **volver a Resend** (plan gratis: 3,000 correos/mes, 100/día, 1 dominio — suficiente para el piloto). Revertido `worker/email.ts` a la API REST de Resend, quitado el binding `send_email` de `wrangler.jsonc`.
   Archivos: `worker/email.ts`, `wrangler.jsonc`, `tests/email-outbox.test.mjs`, `worker-configuration.d.ts`.
+- `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
+### 2026-10-22 (continuación 3) — dominio verificado y llave guardada
+
+- El usuario verificó en Resend **`pipiro.solomexicohn.com`** directamente (no un subdominio separado). Confirmado que no hay conflicto: los registros que agregó Resend (DKIM en `resend._domainkey.pipiro`, SPF en `rsend.pipiro`/`send.pipiro`, DMARC en `_dmarc`) son subniveles distintos al registro que enruta ese host al Worker — conviven sin problema. Se decidió **dejarlo así**, sin re-verificar un subdominio aparte: para un solo flujo de correo transaccional (no hay mezcla con correo masivo ni con otro remitente) la razón de aislar reputación que da Resend no aplica realmente aquí, y re-verificar habría sido trabajo extra sin beneficio real.
+  `EMAIL_FROM` ajustado a `Pipiro <pedidos@pipiro.solomexicohn.com>` para coincidir.
+  Archivos: `wrangler.jsonc`, `tests/email-outbox.test.mjs`, `worker-configuration.d.ts`.
+- `RESEND_API_KEY` ya se guardó como secreto del Worker (confirmado: "Uploaded secret RESEND_API_KEY"), sin pasar por el chat.
 - `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
 
 ### Pendiente / próximos pasos identificados (no implementados todavía)
 
-- **Acción pendiente del usuario:**
-  1. Agregar el dominio en Resend (recomendado: usar el botón "Sign in to Cloudflare" de Resend para que agregue los registros DNS solo; si no, copiar manualmente el MX + 2 TXT que pide a `send.solomexicohn.com` en Cloudflare DNS, con proxy en "DNS Only").
-  2. Verificar el dominio en Resend.
-  3. `wrangler secret put RESEND_API_KEY` en su propia terminal (nunca pegado en el chat).
-  4. Confirmar que `EMAIL_FROM` en `wrangler.jsonc` coincide exactamente con el subdominio verificado.
+- Ninguna acción pendiente de Cloudflare/Resend para el correo — dominio verificado, API key guardada. Falta solo **desplegar** esta rama para que quede activo en producción.
 - El rol `delivery` ya existe (se puede invitar personal con ese rol) pero no tiene ninguna pantalla asociada; tampoco hay evidencia fotográfica de entrega en el punto de recolección.
 - Login por correo (OTP) todavía no implementado — ahora que existen rate limiting y Turnstile reutilizables, es el momento de construirlo sobre esa base.
 - Resto de hallazgos: exposición pública del número de cuenta bancaria, CSV import real, integración Cybersource/BAC, impresión de etiquetas/comandas, etc.
