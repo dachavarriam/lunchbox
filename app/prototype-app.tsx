@@ -46,6 +46,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const [profileStudent, setProfileStudent] = useState<Student | "new" | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [adminDish, setAdminDish] = useState<Dish | "new" | null>(null);
   const [availability, setAvailability] = useState<Availability | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankTransferConfig[]>([{
@@ -556,6 +557,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
             <span aria-hidden="true">↓</span> {t.install}
           </button>
           {surface === "family" && !authenticatedUser && <a className="login-button" href="/login">Ingresar</a>}
+          {surface === "family" && authenticatedUser && <button className="account-button" onClick={() => setAccountOpen(true)}>{language === "es" ? "Mi cuenta" : "My account"}</button>}
           {surface === "family" && authenticatedUser && <button className="logout-button" onClick={() => void logout()}><PipiroIcon name="logout" size={16} />Salir</button>}
           {surface !== "family" && <button className="avatar-button" aria-label={authenticatedUser ? `Cuenta de ${authenticatedUser.display_name}` : "Cuenta del personal"}>
             {authenticatedUser ? authenticatedUser.display_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join("").toLocaleUpperCase("es-HN") : "DC"}
@@ -627,6 +629,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           }}
         />
       )}
+      {accountOpen && authenticatedUser && <AccountDialog user={authenticatedUser} close={() => setAccountOpen(false)} />}
       {historyOpen && <OrderHistoryDialog orders={demoOrders} issues={paymentIssues} close={() => setHistoryOpen(false)} refreshed={refreshDemoOrders} />}
       {notificationsOpen && <NotificationCenter notifications={notifications} close={() => setNotificationsOpen(false)} openOrders={() => { setNotificationsOpen(false); setHistoryOpen(true); }} openSupport={() => { setNotificationsOpen(false); setSupportOpen(true); }} />}
       {supportOpen && <SupportDialog orders={demoOrders} requests={supportRequests} close={() => setSupportOpen(false)} saved={async () => { await refreshDemoOrders(); showToast("Tu mensaje fue enviado"); }} />}
@@ -1368,6 +1371,103 @@ function ProfileDialog({
           {student && <button className="danger-button" disabled={busy} onClick={() => void remove()}>Desactivar</button>}
           <button className="confirm-button" disabled={busy || !confirmedAllergies || !firstName.trim() || !lastName.trim()} onClick={() => void submit()}>{busy ? "Guardando…" : "Guardar perfil"}</button>
         </footer>
+      </section>
+    </div>
+  );
+}
+
+type AccountSession = {
+  id: string;
+  createdAt: string;
+  lastSeenAt: string;
+  userAgent: string | null;
+  current: boolean;
+};
+
+function describeUserAgent(userAgent: string | null): string {
+  if (!userAgent) return "Dispositivo desconocido";
+  const browser = /Edg\//.test(userAgent) ? "Edge"
+    : /Chrome\//.test(userAgent) ? "Chrome"
+    : /Firefox\//.test(userAgent) ? "Firefox"
+    : /Safari\//.test(userAgent) && !/Chrome\//.test(userAgent) ? "Safari"
+    : "Navegador";
+  const os = /iPhone|iPad/.test(userAgent) ? "iOS"
+    : /Android/.test(userAgent) ? "Android"
+    : /Mac OS X/.test(userAgent) ? "macOS"
+    : /Windows/.test(userAgent) ? "Windows"
+    : "";
+  return os ? `${browser} en ${os}` : browser;
+}
+
+function AccountDialog({ user, close }: { user: AuthenticatedUser; close: () => void }) {
+  const [sessions, setSessions] = useState<AccountSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/sessions", { headers: { Accept: "application/json" } });
+      const payload = await response.json() as { sessions?: AccountSession[]; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "No se pudieron cargar las sesiones");
+      setSessions(payload.sessions ?? []);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudieron cargar las sesiones");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
+
+  const revoke = async (id: string) => {
+    setBusyId(id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/auth/sessions/${encodeURIComponent(id)}/revoke`, { method: "POST" });
+      if (!response.ok) throw new Error("No se pudo cerrar esa sesión");
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se pudo cerrar esa sesión");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop account-backdrop" role="presentation" onMouseDown={close}>
+      <section className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header>
+          <div><p className="eyebrow">TU CUENTA PIPIRO</p><h2 id="account-dialog-title">Mi cuenta</h2></div>
+          <button className="close-button" onClick={close} aria-label="Cerrar">×</button>
+        </header>
+        <div className="account-summary">
+          <strong>{user.display_name}</strong>
+          <span>{user.email}</span>
+        </div>
+        <h3>Sesiones activas</h3>
+        <p className="account-help">Si no reconoces un dispositivo, ciérralo aquí.</p>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        {loading ? <p>Cargando…</p> : (
+          <div className="session-list">
+            {sessions.map((session) => (
+              <article key={session.id} className={session.current ? "current" : ""}>
+                <div>
+                  <strong>{describeUserAgent(session.userAgent)}{session.current ? " · esta sesión" : ""}</strong>
+                  <small>Desde {session.createdAt} · última vez {session.lastSeenAt}</small>
+                </div>
+                {!session.current && (
+                  <button disabled={busyId === session.id} onClick={() => void revoke(session.id)}>
+                    {busyId === session.id ? "Cerrando…" : "Cerrar sesión"}
+                  </button>
+                )}
+              </article>
+            ))}
+            {!sessions.length && <p>No hay sesiones activas.</p>}
+          </div>
+        )}
       </section>
     </div>
   );

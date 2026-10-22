@@ -179,6 +179,17 @@ async function verifyGoogleIdToken(idToken: string, env: Env, expectedNonceHash:
   return claims;
 }
 
+const LAST_SEEN_REFRESH_SECONDS = 60 * 60 * 24;
+
+async function createSession(env: Env, userId: string, userAgent: string | null): Promise<string> {
+  const sessionToken = randomToken();
+  const sessionHash = await sha256(sessionToken);
+  const sessionExpiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
+  await env.DB.prepare("INSERT INTO auth_sessions (token_hash, user_id, expires_at, user_agent) VALUES (?, ?, ?, ?)")
+    .bind(sessionHash, userId, sessionExpiresAt, userAgent?.slice(0, 300) ?? null).run();
+  return sessionToken;
+}
+
 export async function resolveSession(request: Request, env: Env, url: URL): Promise<{
   tokenHash: string;
   user: { id: string; email: string; display_name: string; locale: string };
@@ -195,6 +206,10 @@ export async function resolveSession(request: Request, env: Env, url: URL): Prom
   ).bind(tokenHash, Math.floor(Date.now() / 1000)).first<{ id: string; email: string; display_name: string; locale: string }>();
   if (!user) return null;
   const roles = await env.DB.prepare("SELECT role FROM user_roles WHERE user_id = ?").bind(user.id).all<{ role: string }>();
+  // Keep "last seen" useful for the sessions list without writing on every request.
+  await env.DB.prepare(
+    "UPDATE auth_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND last_seen_at < datetime('now', ?)",
+  ).bind(tokenHash, `-${LAST_SEEN_REFRESH_SECONDS} seconds`).run();
   return { tokenHash, user, roles: roles.results.map((role) => role.role) };
 }
 
@@ -377,11 +392,7 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
        WHERE email = ? COLLATE NOCASE AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,
     ).bind(userId, normalizedEmail).run();
 
-    const sessionToken = randomToken();
-    const sessionHash = await sha256(sessionToken);
-    const sessionExpiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
-    await env.DB.prepare("INSERT INTO auth_sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)")
-      .bind(sessionHash, userId, sessionExpiresAt).run();
+    const sessionToken = await createSession(env, userId, request.headers.get("user-agent"));
     const successHeaders = new Headers({ Location: `${origin}${safeReturnTo(loginState.return_to)}`, "Cache-Control": "no-store" });
     successHeaders.append("Set-Cookie", setCookie(authCookieName(url, "session"), sessionToken, SESSION_SECONDS, origin.startsWith("https://")));
     successHeaders.append("Set-Cookie", clearCookie(authCookieName(url, "oauth"), origin.startsWith("https://")));
@@ -403,6 +414,38 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
     const session = await resolveSession(request, env, url);
     if (session) await env.DB.prepare("UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?").bind(session.tokenHash).run();
     return authJson({ ok: true }, { headers: { "Set-Cookie": clearCookie(authCookieName(url, "session"), expectedOrigin.startsWith("https://")) } });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/auth/sessions") {
+    const session = await resolveSession(request, env, url);
+    if (!session) return authJson({ error: "Debes iniciar sesión" }, { status: 401 });
+    const sessions = await env.DB.prepare(
+      `SELECT token_hash, created_at, last_seen_at, user_agent FROM auth_sessions
+       WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ? ORDER BY last_seen_at DESC`,
+    ).bind(session.user.id, Math.floor(Date.now() / 1000)).all<{
+      token_hash: string; created_at: string; last_seen_at: string; user_agent: string | null;
+    }>();
+    return authJson({
+      sessions: sessions.results.map((row) => ({
+        id: row.token_hash,
+        createdAt: row.created_at,
+        lastSeenAt: row.last_seen_at,
+        userAgent: row.user_agent,
+        current: row.token_hash === session.tokenHash,
+      })),
+    });
+  }
+
+  const revokeMatch = url.pathname.match(/^\/api\/auth\/sessions\/([^/]+)\/revoke$/);
+  if (request.method === "POST" && revokeMatch) {
+    if (!requestOriginAllowed(request, env, url)) return authJson({ error: "Origen no permitido" }, { status: 403 });
+    const session = await resolveSession(request, env, url);
+    if (!session) return authJson({ error: "Debes iniciar sesión" }, { status: 401 });
+    const result = await env.DB.prepare(
+      "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND user_id = ? AND revoked_at IS NULL",
+    ).bind(decodeURIComponent(revokeMatch[1]), session.user.id).run();
+    if (!result.meta.changes) return authJson({ error: "Sesión no encontrada" }, { status: 404 });
+    return authJson({ ok: true });
   }
 
   return authJson({ error: "Not found" }, { status: 404 });
