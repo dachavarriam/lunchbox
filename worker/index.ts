@@ -2,7 +2,8 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { handleCmsApi, handlePublicMedia } from "./cms";
-import { authorizeRequest, authorizeSurface, handleAuthApi, requestSurface } from "./auth";
+import { authorizeRequest, authorizeSurface, handleAuthApi, isPrivateDemoHost, requestSurface } from "./auth";
+import type { PipiroSurface } from "./auth";
 import { processPushOutbox, validPushSubscription } from "./push";
 
 const jsonHeaders = {
@@ -1105,6 +1106,23 @@ function notFound(): Response {
   });
 }
 
+// Admin y Cocina se compilan en bundles JS separados (vite code-splitting);
+// esto evita que esos archivos se descarguen desde un host que no sea el suyo,
+// aunque alguien conozca o adivine el nombre exacto del chunk.
+const RESTRICTED_ASSET_SURFACES: Array<{ pattern: RegExp; surface: PipiroSurface }> = [
+  { pattern: /^\/assets\/admin-view-[\w-]+\.js$/, surface: "admin" },
+  { pattern: /^\/assets\/kitchen-view-[\w-]+\.js$/, surface: "kitchen" },
+];
+
+function restrictedAssetBlocked(pathname: string, url: URL, surface: PipiroSurface | null): boolean {
+  const restriction = RESTRICTED_ASSET_SURFACES.find((entry) => entry.pattern.test(pathname));
+  if (!restriction) return false;
+  // Hosts privados de desarrollo (localhost, LAN, Tailscale) comparten un solo host para las
+  // tres superficies y se distinguen por ruta, no por dominio: ahí no aplica esta restricción.
+  if (isPrivateDemoHost(url.hostname)) return false;
+  return restriction.surface !== surface;
+}
+
 function securePageResponse(response: Response): Response {
   const headers = new Headers(response.headers);
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -1119,6 +1137,10 @@ const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     const surface = requestSurface(url, env);
+
+    if ((request.method === "GET" || request.method === "HEAD") && restrictedAssetBlocked(url.pathname, url, surface)) {
+      return notFound();
+    }
 
     try {
       if (surface === "admin" && url.pathname === "/") return redirect("/admin");

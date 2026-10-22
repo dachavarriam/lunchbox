@@ -85,7 +85,7 @@ function isLocalUrl(url: URL): boolean {
   return url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
 }
 
-function isPrivateDemoHost(hostname: string): boolean {
+export function isPrivateDemoHost(hostname: string): boolean {
   if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]") return true;
   if (/^10\./.test(hostname) || /^192\.168\./.test(hostname)) return true;
   const private172 = hostname.match(/^172\.(\d+)\./);

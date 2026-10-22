@@ -102,8 +102,19 @@ test("isolates production surfaces by hostname before rendering", async () => {
   assert.equal(kdsPage.status, 302);
 });
 
+test("blocks admin and kitchen JS chunks from the wrong production host", async () => {
+  const [adminChunkFromFamily, kitchenChunkFromFamily, kitchenChunkFromAdmin] = await Promise.all([
+    fetchProduction("https://pipiro.solomexicohn.com/assets/admin-view-abc123.js"),
+    fetchProduction("https://pipiro.solomexicohn.com/assets/kitchen-view-abc123.js"),
+    fetchProduction("https://admin-pipiro.solomexicohn.com/assets/kitchen-view-abc123.js"),
+  ]);
+  assert.equal(adminChunkFromFamily.status, 404);
+  assert.equal(kitchenChunkFromFamily.status, 404);
+  assert.equal(kitchenChunkFromAdmin.status, 404);
+});
+
 test("ships the local PWA assets, functional migrations and pnpm policy", async () => {
-  const [manifestText, serviceWorker, packageText, workspaceText, wranglerText, functionalMigration, cmsMigration, paymentMigration, authMigration, operationsMigration, customerAccessMigration, officialDataMigration, reconciliationMigration, authSource, prototypeSource, workerSource, cmsSource, pushSource, clientAssets] = await Promise.all([
+  const [manifestText, serviceWorker, packageText, workspaceText, wranglerText, functionalMigration, cmsMigration, paymentMigration, authMigration, operationsMigration, customerAccessMigration, officialDataMigration, reconciliationMigration, authSource, prototypeSource, sharedSource, adminViewSource, kitchenViewSource, workerSource, cmsSource, pushSource, clientAssets] = await Promise.all([
     readFile(new URL("../public/manifest.webmanifest", import.meta.url), "utf8"),
     readFile(new URL("../public/sw.js", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -119,6 +130,9 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
     readFile(new URL("../migrations/0018_payment_reconciliation_actions.sql", import.meta.url), "utf8"),
     readFile(new URL("../worker/auth.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/prototype-app.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/pipiro-shared.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin-view.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/kitchen-view.tsx", import.meta.url), "utf8"),
     readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/cms.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/push.ts", import.meta.url), "utf8"),
@@ -133,7 +147,9 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.equal(manifest.theme_color, "#658BD0");
   assert.match(serviceWorker, /pipiro-logo\.png/);
   assert.match(serviceWorker, /pipiro-fondo\.png/);
-  assert.match(serviceWorker, /pipiro-prototype-v6/);
+  assert.match(serviceWorker, /pipiro-prototype-v7/);
+  assert.match(serviceWorker, /isCacheableRequest/);
+  assert.match(serviceWorker, /pathname\.startsWith\("\/api\/"\)/);
   assert.match(serviceWorker, /addEventListener\("push"/);
   assert.equal(packageJson.packageManager, "pnpm@11.21.0");
   assert.match(packageJson.scripts["dev:lan"], /--hostname 0\.0\.0\.0/);
@@ -171,30 +187,31 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.equal(Object.hasOwn(wranglerConfig.vars, "GOOGLE_CLIENT_SECRET"), false);
   assert.equal(Object.hasOwn(wranglerConfig.vars, "VAPID_PRIVATE_KEY"), false);
   assert.equal(wranglerConfig.r2_buckets.some((bucket) => bucket.binding === "PAYMENT_RECEIPTS" && bucket.bucket_name === "pipiro"), true);
-  assert.match(prototypeSource, /pipiro:order-draft:v1/);
-  assert.match(prototypeSource, /typeof cryptoApi\.randomUUID === "function"/);
+  assert.match(sharedSource, /pipiro:order-draft:v1/);
+  assert.match(sharedSource, /typeof cryptoApi\.randomUUID === "function"/);
   assert.doesNotMatch(prototypeSource, /requestKey: crypto\.randomUUID\(\)/);
   assert.match(prototypeSource, /Transferencia bancaria/);
   assert.match(prototypeSource, /Tarjeta de crédito o débito/);
-  assert.match(prototypeSource, /Tiempo de cocina/);
-  assert.match(prototypeSource, /Accesos del personal/);
-  assert.match(prototypeSource, /Carga de producción por platillo/);
+  assert.match(adminViewSource, /Tiempo de cocina/);
+  assert.match(adminViewSource, /Accesos del personal/);
+  assert.match(kitchenViewSource, /Carga de producción por platillo/);
   assert.match(prototypeSource, /Agrega tu primer estudiante/);
-  assert.match(prototypeSource, /Escuela Internacional Sampedrana/);
+  assert.match(sharedSource, /Escuela Internacional Sampedrana/);
   assert.match(prototypeSource, /desktop-account-nav/);
   assert.match(prototypeSource, /family-shell/);
   assert.match(prototypeSource, /order\.status !== "cancelled" && order\.payment_method\.includes\("transfer"\)/);
   assert.match(prototypeSource, /candidate\.payment_batch_id === order\.payment_batch_id && candidate\.status !== "cancelled"/);
   assert.doesNotMatch(prototypeSource, /Solo almuerzos|Lunch only/);
   assert.match(prototypeSource, /Alergias del perfil/);
-  assert.match(prototypeSource, /Tacos de birria/);
-  assert.match(prototypeSource, /Ventas y pagos/);
-  assert.match(prototypeSource, /Platillos más vendidos/);
+  assert.match(sharedSource, /Tacos de birria/);
+  assert.match(adminViewSource, /Ventas y pagos/);
+  assert.match(adminViewSource, /Platillos más vendidos/);
   assert.match(prototypeSource, /El comprobante es indispensable/);
-  assert.match(prototypeSource, /Pedir comprobante/);
-  assert.match(prototypeSource, /Aprobar manualmente/);
-  assert.doesNotMatch(prototypeSource, /vez\$\{payment\.receipt_request_count === 1 \? "" : "es"\}/);
+  assert.match(adminViewSource, /Pedir comprobante/);
+  assert.match(adminViewSource, /Aprobar manualmente/);
+  assert.doesNotMatch(adminViewSource, /vez\$\{payment\.receipt_request_count === 1 \? "" : "es"\}/);
   assert.match(prototypeSource, /Cancelar pedido/);
+  assert.doesNotMatch(prototypeSource, /Nuevo platillo|Importación masiva|Catálogo de platillos|Servicio de almuerzo|KDS · EIS/);
   assert.doesNotMatch(workerSource, /excludeDemoActor/);
   assert.match(cmsSource, /date\(pb\.created_at, '-6 hours'\)/);
   assert.match(cmsSource, /COALESCE\(ba\.label, 'Banco sin asignar'\)/);
