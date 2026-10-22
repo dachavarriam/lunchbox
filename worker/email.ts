@@ -11,9 +11,21 @@ type EmailOutboxRow = {
   id: string;
   recipient_email: string | null;
   template_key: string;
+  payload_json: string | null;
 };
 
-const emailCopy: Record<string, { subject: string; body: string }> = {
+type EmailCopy = { subject: string; body: string };
+type EmailCopyEntry = EmailCopy | ((payload: Record<string, unknown>) => EmailCopy);
+
+function otpCopy(payload: Record<string, unknown>): EmailCopy {
+  const code = typeof payload.code === "string" ? payload.code : "";
+  return {
+    subject: "Tu código de acceso a Pipiro",
+    body: `Tu código de acceso es: ${code}. Vence en 10 minutos. Si no lo solicitaste, ignora este correo.`,
+  };
+}
+
+const emailCopy: Record<string, EmailCopyEntry> = {
   payment_approved: { subject: "Tu pago fue aprobado", body: "Tu pago fue aprobado y el pedido pasó a cocina." },
   payment_amount_mismatch: { subject: "Revisa el monto de tu pago", body: "El monto recibido no coincide con el total de tu pedido. Entra a Pipiro para resolverlo." },
   payment_receipt_requested: { subject: "Necesitamos tu comprobante", body: "Envía el comprobante de tu transferencia para que podamos confirmar tu pedido." },
@@ -23,7 +35,22 @@ const emailCopy: Record<string, { subject: string; body: string }> = {
   order_delivered: { subject: "Tu almuerzo fue entregado", body: "La institución confirmó la entrega del almuerzo." },
   support_request_created: { subject: "Nueva solicitud de ayuda", body: "Hay un nuevo mensaje de un cliente en Administración." },
   support_response: { subject: "Respondimos tu solicitud", body: "Respondimos tu solicitud de ayuda. Puedes revisarla en Pipiro." },
+  login_otp: otpCopy,
 };
+
+function resolveCopy(templateKey: string, payloadJson: string | null): EmailCopy {
+  const entry = emailCopy[templateKey];
+  if (!entry) return { subject: "Pipiro", body: "Tienes una actualización de tu pedido." };
+  if (typeof entry === "function") {
+    let payload: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = payloadJson ? JSON.parse(payloadJson) : {};
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) payload = parsed as Record<string, unknown>;
+    } catch { /* use the empty payload */ }
+    return entry(payload);
+  }
+  return entry;
+}
 
 function emailHtml(subject: string, body: string, appUrl: string): string {
   return `<!doctype html><html><body style="font-family:-apple-system,Arial,sans-serif;color:#26344d;max-width:480px;margin:0 auto;padding:24px;">
@@ -39,7 +66,7 @@ export async function processEmailOutbox(env: Env): Promise<void> {
   const appUrl = `${env.APP_ORIGIN ?? ""}/?view=orders`;
 
   const outbox = await env.DB.prepare(
-    `SELECT o.id, COALESCE(o.recipient_email, u.email) AS recipient_email, o.template_key
+    `SELECT o.id, COALESCE(o.recipient_email, u.email) AS recipient_email, o.template_key, o.payload_json
      FROM notification_outbox o LEFT JOIN app_users u ON u.id = o.user_id
      WHERE o.channel = 'email' AND o.status = 'queued' AND o.available_at <= CURRENT_TIMESTAMP
      ORDER BY o.created_at LIMIT 25`,
@@ -57,7 +84,7 @@ export async function processEmailOutbox(env: Env): Promise<void> {
       continue;
     }
 
-    const copy = emailCopy[message.template_key] ?? { subject: "Pipiro", body: "Tienes una actualización de tu pedido." };
+    const copy = resolveCopy(message.template_key, message.payload_json);
     let lastError: string | null = null;
     try {
       const response = await fetch("https://api.resend.com/emails", {

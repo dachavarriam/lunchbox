@@ -1200,7 +1200,7 @@ const worker = {
           url.pathname === "/cocina" || url.pathname.startsWith("/cocina/"))) return notFound();
       if (surface === "admin" && (url.pathname === "/cocina" || url.pathname.startsWith("/cocina/"))) return notFound();
       if (surface === "kitchen" && (url.pathname === "/admin" || url.pathname.startsWith("/admin/"))) return notFound();
-      const authResponse = await handleAuthApi(request, env, url);
+      const authResponse = await handleAuthApi(request, env, url, ctx);
       if (authResponse) return authResponse;
       if ((request.method === "GET" || request.method === "HEAD") && surface === "family" && url.pathname === "/") {
         const access = await authorizeSurface(request, env, url, ["customer"]);

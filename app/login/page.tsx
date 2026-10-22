@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { GoogleLoginButton } from "../google-login-button";
+import { LoginMethods } from "../login-methods";
 
 const errorMessages: Record<string, string> = {
   access_denied: "Se canceló el acceso con Google.",
@@ -30,8 +30,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <p>Administra tus estudiantes, pedidos, comprobantes y entregas desde un solo lugar.</p>
         </div>
         {error && <p className="login-error" role="alert">{errorMessages[error] ?? "No se pudo completar el acceso."}</p>}
-        <GoogleLoginButton returnTo={safeReturnTo} />
-        <button className="email-login-button" disabled>Continuar con correo <span>Próximamente</span></button>
+        <LoginMethods returnTo={safeReturnTo} />
         <p className="login-legal">Al continuar aceptas los <Link href="/terminos">términos</Link> y el <Link href="/privacidad">aviso de privacidad</Link> de Pipiro.</p>
       </section>
       <aside className="login-aside" aria-hidden="true"><div><span>Almuerzos escolares</span><strong>Preparados con cuidado.<br />Entregados a tiempo.</strong></div></aside>

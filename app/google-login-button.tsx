@@ -1,17 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (container: string | HTMLElement, options: Record<string, unknown>) => string;
-    };
-  }
-}
-
-const TURNSTILE_SCRIPT_ID = "cf-turnstile-script";
-const TURNSTILE_SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
+import { useTurnstile } from "./use-turnstile";
 
 function GoogleIcon() {
   return (
@@ -25,47 +14,13 @@ function GoogleIcon() {
 }
 
 export function GoogleLoginButton({ returnTo }: { returnTo: string }) {
-  const [siteKey, setSiteKey] = useState<string | null>(null);
-  const [token, setToken] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/public/config", { headers: { Accept: "application/json" } })
-      .then((response) => response.ok ? response.json() as Promise<{ turnstileSiteKey?: string | null }> : null)
-      .then((payload) => { if (!cancelled && payload?.turnstileSiteKey) setSiteKey(payload.turnstileSiteKey); })
-      .catch(() => undefined);
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!siteKey) return;
-    const renderWidget = () => {
-      const container = document.getElementById("turnstile-widget");
-      if (container && window.turnstile) {
-        window.turnstile.render(container, { sitekey: siteKey, action: "login", callback: (widgetToken: string) => setToken(widgetToken) });
-      }
-    };
-    const existing = document.getElementById(TURNSTILE_SCRIPT_ID) as HTMLScriptElement | null;
-    if (existing) {
-      if (window.turnstile) renderWidget();
-      else existing.addEventListener("load", renderWidget);
-      return;
-    }
-    const script = document.createElement("script");
-    script.id = TURNSTILE_SCRIPT_ID;
-    script.src = TURNSTILE_SCRIPT_SRC;
-    script.async = true;
-    script.defer = true;
-    script.addEventListener("load", renderWidget);
-    document.head.appendChild(script);
-  }, [siteKey]);
-
+  const { siteKey, token } = useTurnstile("turnstile-widget-google", "login");
   const needsVerification = Boolean(siteKey) && !token;
   const href = `/api/auth/google/start?returnTo=${encodeURIComponent(returnTo)}${token ? `&turnstileToken=${encodeURIComponent(token)}` : ""}`;
 
   return (
     <>
-      {siteKey && <div id="turnstile-widget" className="turnstile-widget" />}
+      {siteKey && <div id="turnstile-widget-google" className="turnstile-widget" />}
       <a
         className={`google-login-button${needsVerification ? " is-disabled" : ""}`}
         href={needsVerification ? undefined : href}

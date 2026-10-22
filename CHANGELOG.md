@@ -13,6 +13,19 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
 - Se aprovechó para arreglar el único error de tipos preexistente en la rama (`body.subject` perdía su narrowing de tipo dentro de un callback de `.flatMap`) y para agregar `.dev.vars*` a `.gitignore` (el README ya prometía que no se versionaría, pero no estaba excluido).
 - Se investigó colapsar `DEMO_MODE` como parte de esta limpieza y se descartó: `/api/demo/*` es toda la API real de la app, no datos de prueba — apagar esa variable apaga el sitio completo. El verdadero atajo sin login en `worker/auth.ts` ya exige `DEMO_MODE` **y** un host privado (localhost/LAN/Tailscale) a la vez, algo que un dominio de producción nunca puede cumplir.
 
+### 2026-10-22 (continuación 5) — Seguridad/cuentas: cuenta bancaria, sesiones activas, login por correo
+
+- **fix(privacidad):** el número de cuenta bancaria para transferencias (expuesto en `/api/public/config`, sin requerir sesión) ahora solo se incluye si la petición trae una sesión válida (`resolveSession`). Antes cualquiera que visitara el dominio público podía leerlo sin iniciar sesión.
+  Archivos: `worker/index.ts` (`/api/public/config`).
+- **feat(cuenta):** nuevo diálogo "Mi cuenta" en la superficie de familias: lista las sesiones activas del usuario (dispositivo/navegador aproximado, primera vez vista, última actividad, cuál es la actual) y permite cerrar cualquiera de las otras. Dos endpoints nuevos, `GET /api/auth/sessions` y `POST /api/auth/sessions/:id/revoke`, ambos acotados por `user_id` (probado en vivo contra D1 local, incluyendo un intento real de revocar la sesión de otro usuario, que fue correctamente rechazado). `auth_sessions` ahora guarda `user_agent` y refresca `last_seen_at` de forma perezosa (como máximo una vez al día por sesión) para no escribir en cada request.
+  Archivos: `migrations/0020_session_user_agent.sql` (nuevo), `worker/auth.ts` (`createSession`, `GET/POST /api/auth/sessions*`), `app/prototype-app.tsx` (`AccountDialog`), `app/globals.css`.
+- **feat(login):** login por correo con código de un solo uso (OTP), como alternativa a Google para quien no usa o no quiere usar Gmail. Flujo: `POST /api/auth/email/start` (correo + Turnstile) genera un código de 6 dígitos, lo guarda **solo como hash** en `email_otp_codes` (vence a los 10 minutos) y lo encola para envío inmediato por correo; `POST /api/auth/email/verify` (correo + código) lo valida en tiempo constante, bloquea después de 5 intentos fallidos, y en caso de éxito crea la sesión reutilizando exactamente la misma lógica de vinculación/invitación que ya usaba el login de Google (cuentas nuevas solo se crean automáticamente en la superficie de familias; Admin/Cocina exigen invitación previa). Ambos endpoints están limitados por IP y por correo (reutilizando el rate limiter de D1) y devuelven siempre la misma respuesta genérica de error, para no revelar si un correo tiene cuenta o no.
+  - El widget de Turnstile se extrajo a un hook compartido (`useTurnstile`) para que el botón de Google y el formulario de correo mantengan widgets independientes sin duplicar la lógica de carga del script.
+  - `worker/email.ts` ahora soporta plantillas con contenido dinámico (antes solo texto fijo) para poder incluir el código en el cuerpo del correo.
+  - Verificado de extremo a extremo contra D1 local: código generado, hash verificado correctamente, reintento con código equivocado rechazado de forma genérica, reutilización del mismo código rechazada tras consumirlo, bloqueo tras 5 intentos fallidos (incluso con el código correcto), y la sesión creada resuelve correctamente contra `/api/auth/session`.
+  Archivos: `migrations/0021_email_otp_codes.sql` (nuevo), `worker/auth.ts` (`/api/auth/email/start`, `/api/auth/email/verify`), `worker/email.ts` (plantillas dinámicas), `worker/index.ts` (`ctx` pasado a `handleAuthApi`), `app/use-turnstile.ts` (nuevo), `app/email-login-form.tsx` (nuevo), `app/login-methods.tsx` (nuevo), `app/google-login-button.tsx`, `app/login/page.tsx`, `app/globals.css`.
+- `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
 ### 2026-10-22
 
 - **fix(service-worker):** el service worker ya no cachea respuestas de `/api/*`. Antes guardaba en Cache Storage cualquier GET exitoso del mismo origen, incluyendo datos de alergias y estudiantes (`/api/demo/bootstrap`), analíticas de Administración y las imágenes de comprobantes de pago. Ahora solo se cachean el app shell estático (`/`, `/manifest.webmanifest`, íconos) y los bundles compilados bajo `/assets/`. Se incrementó la versión de caché (`v6` → `v7`) para forzar, en el siguiente arranque, la purga de cualquier dato sensible que ya estuviera cacheado en dispositivos existentes.
@@ -69,7 +82,7 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
 
 ### Pendiente / próximos pasos identificados (no implementados todavía)
 
-- Ninguna acción pendiente de Cloudflare/Resend para el correo — dominio verificado, API key guardada. Falta solo **desplegar** esta rama para que quede activo en producción.
+- Reautenticación para acciones de Admin de alto riesgo (step-up auth) — todavía no implementada.
 - El rol `delivery` ya existe (se puede invitar personal con ese rol) pero no tiene ninguna pantalla asociada; tampoco hay evidencia fotográfica de entrega en el punto de recolección.
-- Login por correo (OTP) todavía no implementado — ahora que existen rate limiting y Turnstile reutilizables, es el momento de construirlo sobre esa base.
-- Resto de hallazgos: exposición pública del número de cuenta bancaria, CSV import real, integración Cybersource/BAC, impresión de etiquetas/comandas, etc.
+- CSV import real (hoy solo hay un parser del lado del cliente en el prototipo).
+- Integración Cybersource/BAC, impresión de etiquetas/comandas, etc.

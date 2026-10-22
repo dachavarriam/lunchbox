@@ -1,7 +1,12 @@
-import { checkRateLimit, clientIp } from "./rate-limit";
+import { checkRateLimit, clientIp, rateLimitedResponse } from "./rate-limit";
 import { expectedTurnstileHostnames, verifyTurnstileToken } from "./turnstile";
+import { processEmailOutbox } from "./email";
 
 const TURNSTILE_LOGIN_ACTION = "login";
+const TURNSTILE_EMAIL_ACTION = "email_login";
+const EMAIL_OTP_TTL_SECONDS = 10 * 60;
+const EMAIL_OTP_MAX_ATTEMPTS = 5;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const AUTH_JSON_HEADERS = {
   "Cache-Control": "no-store",
@@ -132,6 +137,18 @@ function safeReturnTo(value: string | null): string {
   return value && value.startsWith("/") && !value.startsWith("//") && value.length <= 500 ? value : "/";
 }
 
+function normalizedEmailOf(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLocaleLowerCase("en-US");
+  return trimmed.length >= 3 && trimmed.length <= 200 && EMAIL_RE.test(trimmed) ? trimmed : null;
+}
+
+function randomOtpCode(): string {
+  const value = new Uint32Array(1);
+  crypto.getRandomValues(value);
+  return String(value[0] % 1_000_000).padStart(6, "0");
+}
+
 function parseJsonRecord(value: string): Record<string, unknown> | null {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -260,7 +277,7 @@ export async function authorizeSurface(request: Request, env: Env, url: URL, rol
   return null;
 }
 
-export async function handleAuthApi(request: Request, env: Env, url: URL): Promise<Response | null> {
+export async function handleAuthApi(request: Request, env: Env, url: URL, ctx: ExecutionContext): Promise<Response | null> {
   if (!url.pathname.startsWith("/api/auth/")) return null;
 
   if (request.method === "GET" && url.pathname === "/api/auth/google/start") {
@@ -397,6 +414,110 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
     successHeaders.append("Set-Cookie", setCookie(authCookieName(url, "session"), sessionToken, SESSION_SECONDS, origin.startsWith("https://")));
     successHeaders.append("Set-Cookie", clearCookie(authCookieName(url, "oauth"), origin.startsWith("https://")));
     return new Response(null, { status: 302, headers: successHeaders });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/email/start") {
+    if (!requestOriginAllowed(request, env, url)) return authJson({ error: "Origen no permitido" }, { status: 403 });
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const normalizedEmail = normalizedEmailOf(body?.email);
+    if (!normalizedEmail) return authJson({ error: "Correo inválido" }, { status: 400 });
+
+    const ipLimit = await checkRateLimit(env, `email_otp_start_ip:${clientIp(request)}`, 10, 10 * 60);
+    if (!ipLimit.allowed) return rateLimitedResponse(ipLimit.retryAfterSeconds);
+    const emailLimit = await checkRateLimit(env, `email_otp_start_email:${normalizedEmail}`, 5, 15 * 60);
+    if (!emailLimit.allowed) return rateLimitedResponse(emailLimit.retryAfterSeconds);
+
+    const expectedHostnames = expectedTurnstileHostnames(env, isPrivateDemoHost(url.hostname) ? url.hostname : null);
+    const turnstileOk = await verifyTurnstileToken(
+      env, typeof body?.turnstileToken === "string" ? body.turnstileToken : null, clientIp(request), TURNSTILE_EMAIL_ACTION, expectedHostnames,
+    );
+    if (!turnstileOk) return authJson({ error: "Verificación fallida" }, { status: 400 });
+
+    const code = randomOtpCode();
+    const codeHash = await sha256(code);
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO email_otp_codes (id, email, code_hash, expires_at) VALUES (?, ?, ?, ?)")
+        .bind(crypto.randomUUID(), normalizedEmail, codeHash, now + EMAIL_OTP_TTL_SECONDS),
+      env.DB.prepare("DELETE FROM email_otp_codes WHERE expires_at < ?").bind(now),
+      env.DB.prepare(
+        "INSERT INTO notification_outbox (id, recipient_email, channel, template_key, payload_json) VALUES (?, ?, 'email', 'login_otp', ?)",
+      ).bind(crypto.randomUUID(), normalizedEmail, JSON.stringify({ code })),
+    ]);
+    ctx.waitUntil(processEmailOutbox(env));
+    return authJson({ ok: true });
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/auth/email/verify") {
+    if (!requestOriginAllowed(request, env, url)) return authJson({ error: "Origen no permitido" }, { status: 403 });
+    const body = await request.json().catch(() => null) as Record<string, unknown> | null;
+    const normalizedEmail = normalizedEmailOf(body?.email);
+    const code = typeof body?.code === "string" ? body.code.trim() : "";
+    const invalid = () => authJson({ error: "Código incorrecto o vencido" }, { status: 400 });
+    if (!normalizedEmail || !/^\d{6}$/.test(code)) return invalid();
+
+    const ipLimit = await checkRateLimit(env, `email_otp_verify_ip:${clientIp(request)}`, 20, 10 * 60);
+    if (!ipLimit.allowed) return rateLimitedResponse(ipLimit.retryAfterSeconds);
+    const emailLimit = await checkRateLimit(env, `email_otp_verify_email:${normalizedEmail}`, 10, 15 * 60);
+    if (!emailLimit.allowed) return rateLimitedResponse(emailLimit.retryAfterSeconds);
+
+    const now = Math.floor(Date.now() / 1000);
+    const pending = await env.DB.prepare(
+      `SELECT id, code_hash, attempts FROM email_otp_codes
+       WHERE email = ? AND consumed_at IS NULL AND expires_at > ? ORDER BY created_at DESC LIMIT 1`,
+    ).bind(normalizedEmail, now).first<{ id: string; code_hash: string; attempts: number }>();
+    if (!pending || pending.attempts >= EMAIL_OTP_MAX_ATTEMPTS) return invalid();
+
+    const candidateHash = await sha256(code);
+    if (!(await equalHashes(candidateHash, pending.code_hash))) {
+      await env.DB.prepare("UPDATE email_otp_codes SET attempts = attempts + 1 WHERE id = ?").bind(pending.id).run();
+      return invalid();
+    }
+    const claimed = await env.DB.prepare(
+      "UPDATE email_otp_codes SET consumed_at = CURRENT_TIMESTAMP WHERE id = ? AND consumed_at IS NULL",
+    ).bind(pending.id).run();
+    if (!claimed.meta.changes) return invalid();
+
+    const existingUser = await env.DB.prepare("SELECT id FROM app_users WHERE email = ? COLLATE NOCASE LIMIT 1")
+      .bind(normalizedEmail).first<{ id: string }>();
+    if (!existingUser && requestSurface(url, env) !== "family") {
+      return authJson({ error: "Esta cuenta necesita una invitación" }, { status: 403 });
+    }
+
+    let userId = existingUser?.id;
+    if (!userId) {
+      userId = crypto.randomUUID();
+      await env.DB.batch([
+        env.DB.prepare("INSERT INTO app_users (id, email, display_name, locale, status) VALUES (?, ?, ?, ?, 'active')")
+          .bind(userId, normalizedEmail, normalizedEmail.split("@")[0].slice(0, 120), env.DEFAULT_LOCALE),
+        env.DB.prepare("INSERT INTO user_roles (user_id, role, school_id) VALUES (?, 'customer', 'school_eis')").bind(userId),
+      ]);
+    } else {
+      await env.DB.prepare(
+        `UPDATE app_users SET status = CASE WHEN status = 'invited' THEN 'active' ELSE status END,
+         updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+      ).bind(userId).run();
+      if (requestSurface(url, env) === "family") {
+        await env.DB.prepare(
+          "INSERT OR IGNORE INTO user_roles (user_id, role, school_id) VALUES (?, 'customer', 'school_eis')",
+        ).bind(userId).run();
+      }
+    }
+    await env.DB.prepare(
+      `UPDATE staff_invitations SET status = 'accepted', accepted_by_user_id = ?, accepted_at = CURRENT_TIMESTAMP
+       WHERE email = ? COLLATE NOCASE AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,
+    ).bind(userId, normalizedEmail).run();
+
+    const [roles, user] = await Promise.all([
+      env.DB.prepare("SELECT role FROM user_roles WHERE user_id = ?").bind(userId).all<{ role: string }>(),
+      env.DB.prepare("SELECT id, email, display_name, locale FROM app_users WHERE id = ? LIMIT 1")
+        .bind(userId).first<{ id: string; email: string; display_name: string; locale: string }>(),
+    ]);
+    const sessionToken = await createSession(env, userId, request.headers.get("user-agent"));
+    const origin = appOrigin(url, env);
+    return authJson({ ok: true, user, roles: roles.results.map((role) => role.role) }, {
+      headers: { "Set-Cookie": setCookie(authCookieName(url, "session"), sessionToken, SESSION_SECONDS, origin.startsWith("https://")) },
+    });
   }
 
   if (request.method === "GET" && url.pathname === "/api/auth/session") {
