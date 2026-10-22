@@ -153,6 +153,8 @@ input:focus-visible {
 .google-login-button { background: #fff; border: 1px solid #d9e0ea; color: #26344d; gap: 12px; text-decoration: none; }
 .email-login-button { background: #e9edf3; border: 0; color: #7a8597; justify-content: space-between; margin-top: 10px; }
 .email-login-button span { background: #fff; border-radius: 999px; font-size: 9px; padding: 5px 7px; text-transform: uppercase; }
+.google-login-button.is-disabled { cursor: not-allowed; opacity: .55; }
+.turnstile-widget { display: flex; justify-content: center; margin: 4px 0; min-height: 65px; }
 .login-error { background: #fff0f0; border-radius: 10px; color: var(--danger); font-size: 12px; margin: 0 0 14px; padding: 11px; }
 .login-legal { color: var(--muted); font-size: 10px; line-height: 1.45; margin: 18px 0 8px; text-align: center; }
 .login-legal a { color: var(--blue); }

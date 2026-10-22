@@ -5,6 +5,8 @@ import { handleCmsApi, handlePublicMedia } from "./cms";
 import { authorizeRequest, authorizeSurface, handleAuthApi, isPrivateDemoHost, requestSurface } from "./auth";
 import type { PipiroSurface } from "./auth";
 import { processPushOutbox, validPushSubscription } from "./push";
+import { processEmailOutbox } from "./email";
+import { checkRateLimit, pruneRateLimitCounters, rateLimitedResponse } from "./rate-limit";
 
 const jsonHeaders = {
   "Cache-Control": "no-store",
@@ -317,6 +319,20 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   );
   if (authorization.response || !authorization.actor) return authorization.response;
   const actorUserId = authorization.actor.userId;
+
+  if (request.method === "POST" && !authorization.actor.demo) {
+    const sensitiveRoute = [
+      { test: () => url.pathname === "/api/demo/orders", bucket: "orders", limit: 30 },
+      { test: () => url.pathname === "/api/demo/payment-batches", bucket: "payment_batches", limit: 15 },
+      { test: () => url.pathname === "/api/demo/support", bucket: "support", limit: 5 },
+      { test: () => /^\/api\/demo\/payment-batches\/[^/]+\/receipt$/.test(url.pathname), bucket: "receipt", limit: 10 },
+      { test: () => /^\/api\/demo\/payments\/[^/]+\/receipt$/.test(url.pathname), bucket: "receipt", limit: 10 },
+    ].find((route) => route.test());
+    if (sensitiveRoute) {
+      const rateLimit = await checkRateLimit(env, `${sensitiveRoute.bucket}:${actorUserId}`, sensitiveRoute.limit, 10 * 60);
+      if (!rateLimit.allowed) return rateLimitedResponse(rateLimit.retryAfterSeconds);
+    }
+  }
 
   if (request.method === "GET" && url.pathname === "/api/demo/bootstrap") {
     const [user, studentResult, orders, credit, issues, support, notifications] = await Promise.all([
@@ -952,6 +968,7 @@ async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Re
     if (!school) return json({ error: "School configuration not found" }, { status: 404 });
     return json({
       school,
+      turnstileSiteKey: env.TURNSTILE_SITE_KEY || null,
       serviceWindows: windows.results.map((window) => ({ ...window, cutoff_time: "23:59", cutoff_rule: "previous_day" })),
       payments: {
         cardEnabled: false,
@@ -1123,13 +1140,35 @@ function restrictedAssetBlocked(pathname: string, url: URL, surface: PipiroSurfa
   return restriction.surface !== surface;
 }
 
-function securePageResponse(response: Response): Response {
+function contentSecurityPolicy(env: Env): string {
+  // 'unsafe-inline' on script-src/style-src is required by this framework's SSR
+  // hydration (inline bootstrap scripts carry per-request RSC payload data, so
+  // they can't be hashed or moved to a static file) and by React's inline
+  // style={{...}} usage. challenges.cloudflare.com is Turnstile's widget/iframe.
+  const mediaOrigin = (() => { try { return new URL(env.PUBLIC_MEDIA_BASE_URL).origin; } catch { return null; } })();
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com",
+    "style-src 'self' 'unsafe-inline'",
+    `img-src 'self' data:${mediaOrigin ? ` ${mediaOrigin}` : ""}`,
+    "font-src 'self'",
+    "connect-src 'self' https://challenges.cloudflare.com",
+    "frame-src https://challenges.cloudflare.com",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+  ].join("; ");
+}
+
+function securePageResponse(response: Response, env: Env): Response {
   const headers = new Headers(response.headers);
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
   headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
   headers.set("Strict-Transport-Security", "max-age=31536000");
+  headers.set("Content-Security-Policy", contentSecurityPolicy(env));
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
@@ -1163,19 +1202,20 @@ const worker = {
         const access = await authorizeSurface(request, env, url, ["admin", "kitchen"]);
         if (access) return access;
       }
-      const dispatchPushImmediately = request.method !== "GET" &&
+      const dispatchNotificationsImmediately = request.method !== "GET" &&
         (url.pathname === "/api/demo/kds/deliver-all" ||
           /^\/api\/demo\/admin\/(payment-batches|support)\/[^/]+(?:\/action)?$/.test(url.pathname));
+      const dispatchNotifications = () => { ctx.waitUntil(processPushOutbox(env)); ctx.waitUntil(processEmailOutbox(env)); };
       const cmsResponse = await handleCmsApi(request, env, url);
       if (cmsResponse) {
-        if (dispatchPushImmediately && cmsResponse.ok) ctx.waitUntil(processPushOutbox(env));
+        if (dispatchNotificationsImmediately && cmsResponse.ok) dispatchNotifications();
         return cmsResponse;
       }
       const mediaResponse = await handlePublicMedia(request, env, url);
       if (mediaResponse) return mediaResponse;
       const demoResponse = await handleDemoApi(request, env, url);
       if (demoResponse) {
-        if (dispatchPushImmediately && demoResponse.ok) ctx.waitUntil(processPushOutbox(env));
+        if (dispatchNotificationsImmediately && demoResponse.ok) dispatchNotifications();
         return demoResponse;
       }
       const apiResponse = await handlePublicApi(request, env, url);
@@ -1203,10 +1243,12 @@ const worker = {
       }, allowedWidths);
     }
 
-    return securePageResponse(await handler.fetch(request, env, ctx));
+    return securePageResponse(await handler.fetch(request, env, ctx), env);
   },
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(processPushOutbox(env));
+    ctx.waitUntil(processEmailOutbox(env));
+    ctx.waitUntil(pruneRateLimitCounters(env));
   },
 };
 

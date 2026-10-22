@@ -1,3 +1,6 @@
+import { checkRateLimit, clientIp } from "./rate-limit";
+import { verifyTurnstileToken } from "./turnstile";
+
 const AUTH_JSON_HEADERS = {
   "Cache-Control": "no-store",
   "Content-Type": "application/json; charset=utf-8",
@@ -246,6 +249,15 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
   if (request.method === "GET" && url.pathname === "/api/auth/google/start") {
     const authEnv: AuthEnv = env;
     if (!authEnv.GOOGLE_CLIENT_SECRET) return authJson({ error: "Google login is not configured" }, { status: 503 });
+    const origin = appOrigin(url, env);
+    const loginFailure = (reason: string) => new Response(null, {
+      status: 302,
+      headers: { Location: `${origin}/login?error=${encodeURIComponent(reason)}`, "Cache-Control": "no-store" },
+    });
+    const rateLimit = await checkRateLimit(env, `auth_start:${clientIp(request)}`, 15, 10 * 60);
+    if (!rateLimit.allowed) return loginFailure("rate_limited");
+    const turnstileOk = await verifyTurnstileToken(env, url.searchParams.get("turnstileToken"), clientIp(request));
+    if (!turnstileOk) return loginFailure("turnstile_failed");
     const state = randomToken();
     const nonce = randomToken();
     const codeVerifier = randomToken(48);
@@ -259,7 +271,6 @@ export async function handleAuthApi(request: Request, env: Env, url: URL): Promi
       env.DB.prepare("DELETE FROM oauth_login_states WHERE expires_at < ? OR consumed_at IS NOT NULL")
         .bind(Math.floor(Date.now() / 1000) - OAUTH_STATE_SECONDS),
     ]);
-    const origin = appOrigin(url, env);
     const authorize = new URL(GOOGLE_AUTHORIZE_URL);
     authorize.search = new URLSearchParams({
       client_id: env.GOOGLE_CLIENT_ID,

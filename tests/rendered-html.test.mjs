@@ -37,6 +37,8 @@ test("renders the branded Pipiro prototype", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  assert.match(response.headers.get("content-security-policy") ?? "", /default-src 'self'/);
+  assert.match(response.headers.get("content-security-policy") ?? "", /object-src 'none'/);
 
   const html = await response.text();
   assert.match(html, /<title>Pipiro by Solo México<\/title>/i);
