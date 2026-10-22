@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { handleCmsApi, handlePublicMedia } from "./cms";
-import { authorizeRequest, authorizeSurface, handleAuthApi, isPrivateDemoHost, requestSurface } from "./auth";
+import { authorizeRequest, authorizeSurface, handleAuthApi, isPrivateDemoHost, requestSurface, resolveSession } from "./auth";
 import type { PipiroSurface } from "./auth";
 import { processPushOutbox, validPushSubscription } from "./push";
 import { processEmailOutbox } from "./email";
@@ -967,24 +967,30 @@ async function handlePublicApi(request: Request, env: Env, url: URL): Promise<Re
     ]);
 
     if (!school) return json({ error: "School configuration not found" }, { status: 404 });
+    // El número de cuenta bancaria solo se entrega a usuarios con sesión: evita
+    // exponer la cuenta receptora de la empresa a cualquiera en internet, lo que
+    // facilitaría páginas de phishing haciéndose pasar por "verifica tu pago".
+    const session = await resolveSession(request, env, url);
     return json({
       school,
       turnstileSiteKey: env.TURNSTILE_SITE_KEY || null,
       serviceWindows: windows.results.map((window) => ({ ...window, cutoff_time: "23:59", cutoff_rule: "previous_day" })),
-      payments: {
-        cardEnabled: false,
-        bankAccounts: bankAccounts.results.map((account) => ({ id: account.id, label: account.label, bankName: account.bank_name,
-          accountHolder: account.account_holder, accountNumber: account.account_number, accountType: account.account_type,
-          instructions: account.instructions })),
-        bankTransfer: {
-          id: bankAccounts.results[0]?.id ?? "bank_default",
-          label: bankAccounts.results[0]?.label ?? paymentSettings?.bank_name ?? env.BANK_NAME,
-          bankName: bankAccounts.results[0]?.bank_name ?? paymentSettings?.bank_name ?? env.BANK_NAME,
-          accountHolder: bankAccounts.results[0]?.account_holder ?? paymentSettings?.account_holder ?? env.BANK_ACCOUNT_HOLDER,
-          accountNumber: bankAccounts.results[0]?.account_number ?? paymentSettings?.account_number ?? env.BANK_ACCOUNT_NUMBER,
-          accountType: bankAccounts.results[0]?.account_type ?? paymentSettings?.account_type ?? env.BANK_ACCOUNT_TYPE,
+      ...(session ? {
+        payments: {
+          cardEnabled: false,
+          bankAccounts: bankAccounts.results.map((account) => ({ id: account.id, label: account.label, bankName: account.bank_name,
+            accountHolder: account.account_holder, accountNumber: account.account_number, accountType: account.account_type,
+            instructions: account.instructions })),
+          bankTransfer: {
+            id: bankAccounts.results[0]?.id ?? "bank_default",
+            label: bankAccounts.results[0]?.label ?? paymentSettings?.bank_name ?? env.BANK_NAME,
+            bankName: bankAccounts.results[0]?.bank_name ?? paymentSettings?.bank_name ?? env.BANK_NAME,
+            accountHolder: bankAccounts.results[0]?.account_holder ?? paymentSettings?.account_holder ?? env.BANK_ACCOUNT_HOLDER,
+            accountNumber: bankAccounts.results[0]?.account_number ?? paymentSettings?.account_number ?? env.BANK_ACCOUNT_NUMBER,
+            accountType: bankAccounts.results[0]?.account_type ?? paymentSettings?.account_type ?? env.BANK_ACCOUNT_TYPE,
+          },
         },
-      },
+      } : {}),
     });
   }
 
