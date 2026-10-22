@@ -4,6 +4,15 @@ Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y pr
 
 ## [Unreleased] — rama `security-upgrades`
 
+### 2026-10-22 (continuación 4) — primer despliegue real y ajustes post-deploy
+
+- Desplegado con `vinext deploy` a los tres dominios de producción. Login con Google + Turnstile probado en vivo por el usuario — funcional.
+- **fix(csp):** la consola mostró un bloqueo real: `static.cloudflareinsights.com/beacon.min.js` (Cloudflare Web Analytics, inyectado automáticamente por la zona) violaba `script-src`. Agregado a la lista blanca; su beacon postea a `/cdn-cgi/rum` del propio dominio, ya cubierto por `connect-src 'self'`.
+  Archivos: `worker/index.ts` (`contentSecurityPolicy`).
+- El resto de los errores de consola reportados **no son de Pipiro**: avisos de "Unrecognized feature" en Permissions-Policy vienen de `accounts.google.com`; los de `TrustedTypePolicy`/`content_script_bin.js`/`tag_assistant_api_bin.js` son de una extensión de Chrome del usuario (parece Tag Assistant); los de `hagen/brunhild.challenges.cloudflare.com`, fuentes WOFF y "No available adapters" son internos al iframe del propio widget de Turnstile, con su propia política, no la nuestra.
+- Se aprovechó para arreglar el único error de tipos preexistente en la rama (`body.subject` perdía su narrowing de tipo dentro de un callback de `.flatMap`) y para agregar `.dev.vars*` a `.gitignore` (el README ya prometía que no se versionaría, pero no estaba excluido).
+- Se investigó colapsar `DEMO_MODE` como parte de esta limpieza y se descartó: `/api/demo/*` es toda la API real de la app, no datos de prueba — apagar esa variable apaga el sitio completo. El verdadero atajo sin login en `worker/auth.ts` ya exige `DEMO_MODE` **y** un host privado (localhost/LAN/Tailscale) a la vez, algo que un dominio de producción nunca puede cumplir.
+
 ### 2026-10-22
 
 - **fix(service-worker):** el service worker ya no cachea respuestas de `/api/*`. Antes guardaba en Cache Storage cualquier GET exitoso del mismo origen, incluyendo datos de alergias y estudiantes (`/api/demo/bootstrap`), analíticas de Administración y las imágenes de comprobantes de pago. Ahora solo se cachean el app shell estático (`/`, `/manifest.webmanifest`, íconos) y los bundles compilados bajo `/assets/`. Se incrementó la versión de caché (`v6` → `v7`) para forzar, en el siguiente arranque, la purga de cualquier dato sensible que ya estuviera cacheado en dispositivos existentes.
