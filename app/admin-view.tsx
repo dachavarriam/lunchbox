@@ -271,6 +271,7 @@ export function AdminView({
         <CreditAdminPanel showToast={showToast} refresh={refreshOrders} />
         <SupportAdminPanel showToast={showToast} />
         <StaffAccessPanel showToast={showToast} />
+        <DeliveryConfirmationsPanel />
         <section className="panel import-panel">
           <div className="panel-title">
             <div>
@@ -571,6 +572,20 @@ function StaffAccessPanel({ showToast }: { showToast: (message: string) => void 
     } catch (cause) { if (cause instanceof ReauthRedirect) return; showToast(cause instanceof Error ? cause.message : "No se pudo crear la invitación"); } finally { setBusy(false); }
   };
   return <section className="panel staff-access-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="user" /></span><div><h2>Accesos del personal</h2><p>Solo las personas que invites reciben rol de Administración, Cocina o Entrega</p></div></div><span className="safe-chip">{staff.length} autorizados</span></div><div className="staff-list">{staff.map((person) => <article key={person.id}><div><strong>{person.display_name}</strong><span>{person.email}</span></div><em>{person.roles.split(",").join(" · ")}</em><small>{person.status === "active" ? "Activo" : "Invitado"}</small></article>)}</div><div className="admin-inline-form staff-invite-form"><label><span>Nombre</span><input value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label><label><span>Correo autorizado</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label><span>Rol</span><select value={role} onChange={(event) => setRole(event.target.value as typeof role)}><option value="kitchen">Cocina</option><option value="delivery">Entrega</option><option value="admin">Administrador</option></select></label><button disabled={busy || displayName.trim().length < 2 || !email.includes("@")} onClick={() => void invite()}>{busy ? "Creando…" : "Crear invitación"}</button></div><p className="panel-footnote">El acceso por PIN para dispositivos compartidos de cocina se configurará cuando definamos el equipo; no usaremos un PIN global compartido.</p></section>;
+}
+
+function DeliveryConfirmationsPanel() {
+  type DeliveryConfirmation = { id: string; order_count: number; created_at: string; delivered_by: string };
+  const [confirmations, setConfirmations] = useState<DeliveryConfirmation[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/demo/admin/delivery-confirmations", { headers: { Accept: "application/json" }, signal: controller.signal })
+      .then((response) => response.ok ? response.json() as Promise<{ confirmations?: DeliveryConfirmation[] }> : null)
+      .then((payload) => setConfirmations(payload?.confirmations ?? [])).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+  const dateFormat = new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short" });
+  return <section className="panel delivery-confirmations-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="check" /></span><div><h2>Evidencia de entregas</h2><p>Fotos confirmando la entrega en el punto de recolección</p></div></div><span className="safe-chip">{confirmations.length} registradas</span></div><div className="delivery-confirmations-list">{confirmations.map((confirmation) => <article key={confirmation.id}><div><strong>{confirmation.order_count} pedido(s)</strong><span>{confirmation.delivered_by} · {dateFormat.format(new Date(confirmation.created_at))}</span></div><a href={`/api/demo/admin/delivery-confirmations/${confirmation.id}/photo`} target="_blank" rel="noreferrer">Ver foto</a></article>)}{!confirmations.length && <div className="empty-transfer">Aún no hay entregas confirmadas con foto.</div>}</div></section>;
 }
 
 type AdminSupportRequest = SupportRequest & { display_name: string; order_number: string | null };

@@ -1,8 +1,22 @@
 # Changelog
 
-Registro de trabajo de la rama `security-upgrades`: auditoría de seguridad y privacidad, y preparación técnica para la integración de pagos con BAC/Cybersource. Sirve de base para documentación formal más adelante.
+Registro de trabajo de seguridad/privacidad (rama `security-upgrades`, ya fusionada a `main`) y de las mejoras funcionales que le siguieron (rama `functional-upgrades`). Sirve de base para documentación formal más adelante.
 
-## [Unreleased] — rama `security-upgrades`
+## [Unreleased] — rama `functional-upgrades`
+
+### 2026-10-22 — bloque "Funcional": catálogo CSV (ya real) y rol delivery con evidencia fotográfica
+
+- **Catálogo CSV:** se revisó el pendiente "CSV import real (solo parser del lado del cliente)" y resultó estar **desactualizado** — `app/admin-view.tsx`'s `applyImport()` ya llama a los endpoints reales `POST`/`PATCH /api/demo/admin/dishes` (`worker/cms.ts`) por cada fila; el parseo CSV solo ocurre en el navegador para mostrar una vista previa antes de aplicar. Verificado en vivo: un platillo creado vía ese endpoint persiste en D1 local. No se tocó código; se actualizó la nota en "Pendiente" para reflejar la realidad.
+- **feat(delivery):** el rol `delivery` (ya invitable desde Administración) ahora tiene una pantalla real, y la entrega exige evidencia fotográfica:
+  - Nueva tabla `delivery_confirmations` (foto + lista de pedidos incluidos + quién y cuándo).
+  - Nuevo endpoint `POST /api/demo/delivery/confirm` (rol `admin` o `delivery`): toma la misma selección de "pedidos empacados del día más próximo" que ya usaba `kds/deliver-all`, pero exige una foto (mismo validador de firma de archivo que los comprobantes de pago: JPEG/PNG/WebP/HEIC/HEIF, hasta 5 MB), la guarda en el bucket `PAYMENT_RECEIPTS` bajo el prefijo `delivery-photos/`, y además de marcar los pedidos como entregados, registra la confirmación. `GET /api/demo/kds` ahora también es legible por el rol `delivery` (antes solo admin/cocina).
+  - La pantalla de Cocina (`/cocina`) ahora distingue: si la sesión tiene **únicamente** el rol `delivery` (no `kitchen` ni `admin`), ve una pantalla de Entrega (`DeliveryView`, en `app/kitchen-view.tsx`) en vez del tablero KDS — lista los pedidos empacados, pide tomar/elegir una foto y confirmar. El botón "Confirmar entregados" de la vista normal de Cocina **no se tocó** (sigue disponible para cocina/admin sin pedir foto, para no interrumpir la operación actual mientras no haya personal con rol delivery asignado).
+  - Admin ganó un panel nuevo ("Evidencia de entregas", en Configuración) que lista las confirmaciones con fecha, quién entregó y cuántos pedidos, con un enlace "Ver foto" a `GET /api/demo/admin/delivery-confirmations/:id/photo` (streaming directo del objeto R2, sin exponerlo públicamente).
+  - Verificado en vivo de extremo a extremo: avancé un pedido real hasta `packed`, inicié sesión real (OTP) como usuario con rol `delivery`, confirmé la entrega con una foto de prueba vía `POST /api/demo/delivery/confirm` — el pedido quedó `delivered`, la fila en `delivery_confirmations` quedó correcta, y `GET` del admin devolvió exactamente los mismos bytes de la foto subida. Confirmé además el aislamiento de roles en ambas direcciones: una sesión con rol `kitchen` (sin `delivery`) recibe 403 en `/api/demo/delivery/confirm`, y una sesión con rol `delivery` (sin `kitchen`) recibe 403 en `/api/demo/kds/deliver-all`. La pantalla `DeliveryView` se verificó visualmente en el navegador con datos reales.
+  Archivos: `migrations/0022_delivery_confirmations.sql` (nuevo), `worker/index.ts` (`/api/demo/delivery/confirm`, roles de `/cocina` y `/api/demo/kds`), `worker/cms.ts` (`/api/demo/admin/delivery-confirmations*`), `app/kitchen-view.tsx` (`DeliveryView`), `app/prototype-app.tsx` (`confirmDelivery`, selección de vista por rol), `app/admin-view.tsx` (`DeliveryConfirmationsPanel`), `app/globals.css`.
+- `pnpm test` (10 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos (1 warning preexistente de estilo de Next.js por usar `<img>` para la vista previa local de la foto, correcto en este caso ya que es un blob del propio dispositivo, no una imagen remota optimizable).
+
+## [Unreleased] — rama `security-upgrades` (fusionada a `main`)
 
 ### 2026-10-22 (continuación 4) — primer despliegue real y ajustes post-deploy
 

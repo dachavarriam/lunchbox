@@ -307,14 +307,20 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   const disabled = assertDemoMode(env);
   if (disabled) return disabled;
 
-  const kitchenRequest = url.pathname === "/api/demo/kds" || url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/orders\/[^/]+\/(status|print)$/.test(url.pathname);
+  const kdsReadRequest = url.pathname === "/api/demo/kds";
+  const kitchenWriteRequest = url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/orders\/[^/]+\/(status|print)$/.test(url.pathname);
+  const deliveryWriteRequest = url.pathname === "/api/demo/delivery/confirm";
+  const kitchenRequest = kdsReadRequest || kitchenWriteRequest || deliveryWriteRequest;
   const adminBootstrapRequest = url.pathname === "/api/demo/bootstrap" &&
     (requestSurface(url, env) === "admin" || (requestSurface(url, env) === null && url.searchParams.get("surface") === "admin"));
   const authorization = await authorizeRequest(
     request,
     env,
     url,
-    kitchenRequest ? ["admin", "kitchen"] : adminBootstrapRequest ? ["admin"] : ["customer"],
+    kdsReadRequest ? ["admin", "kitchen", "delivery"]
+      : kitchenWriteRequest ? ["admin", "kitchen"]
+      : deliveryWriteRequest ? ["admin", "delivery"]
+      : adminBootstrapRequest ? ["admin"] : ["customer"],
     kitchenRequest || adminBootstrapRequest ? "user_admin_dachavarriam" : "user_demo_family",
   );
   if (authorization.response || !authorization.actor) return authorization.response;
@@ -327,6 +333,7 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
       { test: () => url.pathname === "/api/demo/support", bucket: "support", limit: 5 },
       { test: () => /^\/api\/demo\/payment-batches\/[^/]+\/receipt$/.test(url.pathname), bucket: "receipt", limit: 10 },
       { test: () => /^\/api\/demo\/payments\/[^/]+\/receipt$/.test(url.pathname), bucket: "receipt", limit: 10 },
+      { test: () => url.pathname === "/api/demo/delivery/confirm", bucket: "delivery_confirm", limit: 10 },
     ].find((route) => route.test());
     if (sensitiveRoute) {
       const rateLimit = await checkRateLimit(env, `${sensitiveRoute.bucket}:${actorUserId}`, sensitiveRoute.limit, 10 * 60);
@@ -940,6 +947,50 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
     return json({ ok: true, delivered: rows.results.length });
   }
 
+  if (request.method === "POST" && url.pathname === "/api/demo/delivery/confirm") {
+    const rows = await env.DB.prepare(
+      `SELECT o.id, o.guardian_user_id FROM orders o JOIN menu_days md ON md.id = o.menu_day_id
+       JOIN payment_batch_orders pbo ON pbo.order_id = o.id JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
+       WHERE pb.status = 'approved' AND o.status = 'packed' AND md.service_date = (
+         SELECT MIN(md2.service_date) FROM orders o2 JOIN menu_days md2 ON md2.id = o2.menu_day_id
+         JOIN payment_batch_orders pbo2 ON pbo2.order_id = o2.id JOIN payment_batches pb2 ON pb2.id = pbo2.payment_batch_id
+         WHERE pb2.status = 'approved' AND o2.status = 'packed'
+       )`,
+    ).all<{ id: string; guardian_user_id: string }>();
+    if (!rows.results.length) return json({ ok: true, delivered: 0 });
+
+    const contentLength = Number(request.headers.get("content-length") ?? "0");
+    if (contentLength > 6_000_000) return json({ error: "La foto debe pesar menos de 5 MB" }, { status: 413 });
+    const form = await request.formData();
+    const photo = form.get("photo");
+    if (!(photo instanceof File) || photo.size < 1 || photo.size > 5_000_000 || !(await validReceiptSignature(photo))) {
+      return json({ error: "Adjunta una foto JPEG, PNG, WebP, HEIC o HEIF de hasta 5 MB como evidencia de entrega" }, { status: 415 });
+    }
+    const extensions: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/heic": "heic", "image/heif": "heif" };
+    const confirmationId = crypto.randomUUID();
+    const objectKey = `delivery-photos/${confirmationId}.${extensions[photo.type]}`;
+    await env.PAYMENT_RECEIPTS.put(objectKey, photo.stream(), {
+      httpMetadata: { contentType: photo.type }, customMetadata: { confirmationId, purpose: "delivery-photo" },
+    });
+    const orderIds = rows.results.map((order) => order.id);
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO delivery_confirmations (id, delivered_by_user_id, photo_object_key, photo_content_type, order_count, order_ids_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      ).bind(confirmationId, actorUserId, objectKey, photo.type, orderIds.length, JSON.stringify(orderIds)),
+      ...rows.results.flatMap((order) => [
+        env.DB.prepare("UPDATE orders SET status = 'delivered', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'packed'").bind(order.id),
+        env.DB.prepare(
+          "INSERT INTO order_status_events (id, order_id, from_status, to_status, actor_user_id, note) VALUES (?, ?, 'packed', 'delivered', ?, 'Entrega confirmada con evidencia fotográfica')",
+        ).bind(crypto.randomUUID(), order.id, actorUserId),
+        env.DB.prepare("INSERT INTO notifications (id, user_id, order_id, channel, template_key) VALUES (?, ?, ?, 'in_app', 'order_delivered')").bind(crypto.randomUUID(), order.guardian_user_id, order.id),
+        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'email', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
+        env.DB.prepare("INSERT INTO notification_outbox (id, user_id, order_id, channel, template_key, payload_json) VALUES (?, ?, ?, 'push', 'order_delivered', ?)").bind(crypto.randomUUID(), order.guardian_user_id, order.id, JSON.stringify({ orderId: order.id })),
+      ]),
+    ]);
+    return json({ ok: true, delivered: rows.results.length, confirmationId });
+  }
+
   return json({ error: "Not found" }, { status: 404 });
 }
 
@@ -1211,11 +1262,11 @@ const worker = {
         if (access) return access;
       }
       if ((request.method === "GET" || request.method === "HEAD") && (url.pathname === "/cocina" || url.pathname.startsWith("/cocina/"))) {
-        const access = await authorizeSurface(request, env, url, ["admin", "kitchen"]);
+        const access = await authorizeSurface(request, env, url, ["admin", "kitchen", "delivery"]);
         if (access) return access;
       }
       const dispatchNotificationsImmediately = request.method !== "GET" &&
-        (url.pathname === "/api/demo/kds/deliver-all" ||
+        (url.pathname === "/api/demo/kds/deliver-all" || url.pathname === "/api/demo/delivery/confirm" ||
           /^\/api\/demo\/admin\/(payment-batches|support)\/[^/]+(?:\/action)?$/.test(url.pathname));
       const dispatchNotifications = () => { ctx.waitUntil(processPushOutbox(env)); ctx.waitUntil(processEmailOutbox(env)); };
       const cmsResponse = await handleCmsApi(request, env, url);

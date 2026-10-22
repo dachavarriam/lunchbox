@@ -16,6 +16,7 @@ import type {
 const LazyAdminView = lazy(() => import("./admin-view").then((module) => ({ default: module.AdminView })));
 const LazyAdminDishDialog = lazy(() => import("./admin-view").then((module) => ({ default: module.AdminDishDialog })));
 const LazyKitchenView = lazy(() => import("./kitchen-view").then((module) => ({ default: module.KitchenView })));
+const LazyDeliveryView = lazy(() => import("./kitchen-view").then((module) => ({ default: module.DeliveryView })));
 
 function SurfaceLoading() {
   return <div className="page-content" style={{ padding: "3rem", textAlign: "center" }}>Cargando…</div>;
@@ -65,6 +66,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const [paymentIssues, setPaymentIssues] = useState<PaymentIssue[]>([]);
   const [applyCredit, setApplyCredit] = useState(false);
   const [authenticatedUser, setAuthenticatedUser] = useState<AuthenticatedUser | null>(null);
+  const [staffRoles, setStaffRoles] = useState<string[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -73,6 +75,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftReady = useRef(false);
   const t = ui[language];
+  const isDeliveryOnly = staffRoles.includes("delivery") && !staffRoles.includes("kitchen") && !staffRoles.includes("admin");
   const todayLabel = formatLongDate(now, language);
   const selectedDateLabel = formatDateIdLabel(selectedDate, language);
   const todayId = formatDateId(now);
@@ -120,9 +123,12 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
 
   useEffect(() => {
     void fetch("/api/auth/session", { headers: { Accept: "application/json" } })
-      .then((response) => response.ok ? response.json() as Promise<{ authenticated: boolean; user?: AuthenticatedUser }> : null)
-      .then((session) => setAuthenticatedUser(session?.authenticated && session.user ? session.user : null))
-      .catch(() => setAuthenticatedUser(null));
+      .then((response) => response.ok ? response.json() as Promise<{ authenticated: boolean; user?: AuthenticatedUser; roles?: string[] }> : null)
+      .then((session) => {
+        setAuthenticatedUser(session?.authenticated && session.user ? session.user : null);
+        setStaffRoles(session?.authenticated && session.roles ? session.roles : []);
+      })
+      .catch(() => { setAuthenticatedUser(null); setStaffRoles([]); });
   }, [surface]);
 
   useEffect(() => {
@@ -492,6 +498,16 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
     showToast(payload.delivered ? `${payload.delivered} pedidos marcados como entregados` : "No hay pedidos empacados pendientes");
   };
 
+  const confirmDelivery = async (photo: File) => {
+    const form = new FormData();
+    form.append("photo", photo);
+    const response = await fetch("/api/demo/delivery/confirm", { method: "POST", body: form });
+    const payload = await response.json() as { delivered?: number; error?: string };
+    if (!response.ok) { showToast(payload.error ?? "No se pudo confirmar la entrega"); return; }
+    await refreshDemoOrders();
+    showToast(payload.delivered ? `${payload.delivered} pedidos entregados con evidencia fotográfica` : "No hay pedidos empacados pendientes");
+  };
+
   const reviewNotifications = async () => {
     const unread = notifications.filter((item) => item.status !== "read");
     setNotificationsOpen(true);
@@ -659,7 +675,12 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
           />
         </Suspense>
       )}
-      {surface === "kitchen" && (
+      {surface === "kitchen" && isDeliveryOnly && (
+        <Suspense fallback={<SurfaceLoading />}>
+          <LazyDeliveryView orders={kdsOrders} confirmDelivery={confirmDelivery} showToast={showToast} />
+        </Suspense>
+      )}
+      {surface === "kitchen" && !isDeliveryOnly && (
         <Suspense fallback={<SurfaceLoading />}>
           <LazyKitchenView orders={kdsOrders} advanceOrder={advanceOrder} queuePrint={queuePrint} deliverAllPacked={deliverAllPacked} showToast={showToast} />
         </Suspense>

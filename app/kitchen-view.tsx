@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PipiroIcon, APP_TIME_ZONE } from "./pipiro-shared";
 import type { KdsOrder, KdsStage } from "./pipiro-shared";
 
@@ -98,6 +98,80 @@ export function KitchenView({ orders, advanceOrder, queuePrint, deliverAllPacked
           );
         })}
       </div>
+    </div>
+  );
+}
+
+export function DeliveryView({ orders, confirmDelivery, showToast }: {
+  orders: KdsOrder[];
+  confirmDelivery: (photo: File) => Promise<void>;
+  showToast: (message: string) => void;
+}) {
+  const pending = useMemo(() => orders.filter((order) => order.stage === "Empacadas"), [orders]);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
+
+  const pickPhoto = (file: File) => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setPhoto(file);
+    setPreviewUrl(URL.createObjectURL(file));
+  };
+
+  const confirm = async () => {
+    if (!photo) { showToast("Toma o selecciona una foto como evidencia de entrega"); return; }
+    if (!window.confirm(`¿Confirmar la entrega de ${pending.length} pedido(s) en el punto de recolección?`)) return;
+    setConfirming(true);
+    try {
+      await confirmDelivery(photo);
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setPhoto(null);
+      setPreviewUrl(null);
+      if (fileInput.current) fileInput.current.value = "";
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <div className="delivery-page">
+      <section className="delivery-toolbar">
+        <p className="eyebrow">ENTREGA · EIS</p>
+        <h1>Confirmar entrega</h1>
+        <span>{pending.length} pedido(s) empacados listos para el punto de recolección</span>
+      </section>
+
+      <div className="delivery-order-list">
+        {pending.map((order) => (
+          <article key={order.id} className="delivery-ticket">
+            <strong>{order.student}</strong>
+            <span>{order.classroom}</span>
+            <small>{order.dish}</small>
+          </article>
+        ))}
+        {!pending.length && <div className="empty-stage">No hay pedidos empacados pendientes de entrega</div>}
+      </div>
+
+      <section className="delivery-photo-card">
+        <h2>Evidencia fotográfica</h2>
+        <p>Toma una foto en el punto de recolección antes de confirmar la entrega.</p>
+        {previewUrl && <img className="delivery-photo-preview" src={previewUrl} alt="Vista previa de la evidencia de entrega" />}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+          capture="environment"
+          onChange={(event) => event.target.files?.[0] && pickPhoto(event.target.files[0])}
+          className="visually-hidden"
+        />
+        <button className="delivery-photo-button" onClick={() => fileInput.current?.click()}>{photo ? "Cambiar foto" : "Tomar foto"}</button>
+        <button className="delivery-confirm-button" disabled={!photo || !pending.length || confirming} onClick={() => void confirm()}>
+          {confirming ? "Confirmando…" : "Confirmar entrega"}
+        </button>
+      </section>
     </div>
   );
 }

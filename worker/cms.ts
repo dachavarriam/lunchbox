@@ -475,6 +475,28 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     return cmsJson({ id: invitationId, userId: staffUserId, status: "pending" }, { status: 201 });
   }
 
+  if (request.method === "GET" && url.pathname === "/api/demo/admin/delivery-confirmations") {
+    const confirmations = await env.DB.prepare(
+      `SELECT dc.id, dc.order_count, dc.created_at, u.display_name AS delivered_by
+       FROM delivery_confirmations dc JOIN app_users u ON u.id = dc.delivered_by_user_id
+       ORDER BY dc.created_at DESC LIMIT 50`,
+    ).all();
+    return cmsJson({ confirmations: confirmations.results });
+  }
+
+  const deliveryPhotoMatch = url.pathname.match(/^\/api\/demo\/admin\/delivery-confirmations\/([^/]+)\/photo$/);
+  if (request.method === "GET" && deliveryPhotoMatch) {
+    const confirmation = await env.DB.prepare(
+      "SELECT photo_object_key, photo_content_type FROM delivery_confirmations WHERE id = ? LIMIT 1",
+    ).bind(deliveryPhotoMatch[1]).first<{ photo_object_key: string; photo_content_type: string }>();
+    if (!confirmation) return cmsJson({ error: "Evidencia no encontrada" }, { status: 404 });
+    const object = await env.PAYMENT_RECEIPTS.get(confirmation.photo_object_key);
+    if (!object) return cmsJson({ error: "Evidencia no encontrada" }, { status: 404 });
+    return new Response(object.body, {
+      headers: { "Cache-Control": "private, no-store", "Content-Type": confirmation.photo_content_type, "X-Content-Type-Options": "nosniff" },
+    });
+  }
+
   if (request.method === "POST" && url.pathname === "/api/demo/admin/credits") {
     const body = await boundedJson(request);
     if (!isRecord(body) || typeof body.amountCents !== "number" || !Number.isInteger(body.amountCents) ||
