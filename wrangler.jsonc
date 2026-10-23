@@ -65,6 +65,6 @@
     }
   },
   "secrets": {
-    "required": ["GOOGLE_CLIENT_SECRET", "VAPID_PRIVATE_KEY"]
+    "required": ["GOOGLE_CLIENT_SECRET", "VAPID_PRIVATE_KEY", "TURNSTILE_SECRET_KEY", "RESEND_API_KEY"]
   }
 }

@@ -107,8 +107,11 @@ export async function processEmailOutbox(env: Env): Promise<void> {
     }
 
     if (!lastError) {
-      await env.DB.prepare("UPDATE notification_outbox SET status = 'sent', sent_at = CURRENT_TIMESTAMP, last_error = NULL WHERE id = ?")
-        .bind(message.id).run();
+      // login_otp's payload carries the plaintext code; nothing needs it once the email is sent.
+      const clearPayload = message.template_key === "login_otp";
+      await env.DB.prepare(
+        `UPDATE notification_outbox SET status = 'sent', sent_at = CURRENT_TIMESTAMP, last_error = NULL${clearPayload ? ", payload_json = NULL" : ""} WHERE id = ?`,
+      ).bind(message.id).run();
     } else {
       await env.DB.prepare(
         `UPDATE notification_outbox SET status = CASE WHEN attempts < 3 THEN 'queued' ELSE 'failed' END,

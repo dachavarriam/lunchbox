@@ -185,7 +185,7 @@ test("ships the local PWA assets, functional migrations and pnpm policy", async 
   assert.match(authSource, /authorizeRequest/);
   assert.match(authSource, /No tienes permiso para esta sección/);
   assert.match(authSource, /requestSurface\(url, env\) === "family"/);
-  assert.deepEqual(wranglerConfig.secrets.required, ["GOOGLE_CLIENT_SECRET", "VAPID_PRIVATE_KEY"]);
+  assert.deepEqual(wranglerConfig.secrets.required, ["GOOGLE_CLIENT_SECRET", "VAPID_PRIVATE_KEY", "TURNSTILE_SECRET_KEY", "RESEND_API_KEY"]);
   assert.equal(Object.hasOwn(wranglerConfig.vars, "GOOGLE_CLIENT_SECRET"), false);
   assert.equal(Object.hasOwn(wranglerConfig.vars, "VAPID_PRIVATE_KEY"), false);
   assert.equal(wranglerConfig.r2_buckets.some((bucket) => bucket.binding === "PAYMENT_RECEIPTS" && bucket.bucket_name === "pipiro"), true);

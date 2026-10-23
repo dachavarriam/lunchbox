@@ -1,8 +1,22 @@
 # Changelog
 
-Registro de trabajo de seguridad/privacidad (rama `security-upgrades`, ya fusionada a `main`) y de las mejoras funcionales que le siguieron (rama `functional-upgrades`). Sirve de base para documentación formal más adelante.
+Registro de trabajo de seguridad/privacidad (rama `security-upgrades`) y de las mejoras funcionales que le siguieron (rama `functional-upgrades`) — ambas ya fusionadas a `main`. Sirve de base para documentación formal más adelante.
 
-## [Unreleased] — rama `functional-upgrades`
+## [Unreleased] — rama `final-audit`
+
+### 2026-10-23 — auditoría final de seguridad y privacidad (tras Seguridad + Funcional)
+
+Revisión de cierre pedida explícitamente para revisar cómo quedó la plataforma después de los bloques de Seguridad y Funcional. Se encontraron y corrigieron 3 problemas concretos; el resto son notas de endurecimiento sin cambios de código (ver mensaje al usuario con el detalle completo).
+
+- **fix(csp):** `img-src` no incluía `blob:` — la vista previa de foto nueva de `DeliveryOrderCard` (`URL.createObjectURL`) se habría bloqueado en producción por CSP. Nunca se probó en navegador durante el trabajo de "Funcional" (solo se probó el upload real vía `curl`, no el `<img>` de vista previa). Verificado ahora en vivo: una imagen cargada como blob URL carga correctamente bajo el CSP actual, sin violaciones en consola.
+  Archivos: `worker/index.ts` (`contentSecurityPolicy`).
+- **fix(privacidad):** el código OTP en texto plano quedaba para siempre en `notification_outbox.payload_json` una vez enviado el correo (nunca se limpiaba). Ahora, al marcar un mensaje `login_otp` como `sent`, también se limpia `payload_json`. Cubierto con una prueba nueva.
+  Archivos: `worker/email.ts`, `tests/email-outbox.test.mjs`.
+- **hardening:** `TURNSTILE_SECRET_KEY` y `RESEND_API_KEY` ya están configurados en producción (confirmado por el usuario durante el trabajo de Seguridad) pero no estaban en `secrets.required`, así que si alguno se borrara por error en el dashboard de Cloudflare, el login y el OTP fallarían **en silencio** (Turnstile sin aplicar, correos sin enviarse) en vez de fallar fuerte. Se agregaron a la lista de requeridos para que una futura ausencia se note de inmediato.
+  Archivos: `wrangler.jsonc`, `tests/rendered-html.test.mjs`.
+- `pnpm test` (11 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
+## [Unreleased] — rama `functional-upgrades` (fusionada a `main`)
 
 ### 2026-10-22 — bloque "Funcional": catálogo CSV (ya real) y rol delivery con evidencia fotográfica
 

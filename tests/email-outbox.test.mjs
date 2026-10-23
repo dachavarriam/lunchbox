@@ -12,7 +12,12 @@ function makeFakeDb(rows, users = { user_1: "family@example.com" }) {
       return {
         results: outbox
           .filter((row) => row.channel === "email" && row.status === "queued")
-          .map((row) => ({ id: row.id, recipient_email: row.recipient_email ?? users[row.user_id] ?? null, template_key: row.template_key })),
+          .map((row) => ({
+            id: row.id,
+            recipient_email: row.recipient_email ?? users[row.user_id] ?? null,
+            template_key: row.template_key,
+            payload_json: row.payload_json ?? null,
+          })),
       };
     }
     if (normalized.startsWith("UPDATE notification_outbox SET status = 'sending'")) {
@@ -30,7 +35,9 @@ function makeFakeDb(rows, users = { user_1: "family@example.com" }) {
     }
     if (normalized.startsWith("UPDATE notification_outbox SET status = 'sent'")) {
       const [id] = params;
-      Object.assign(outbox.find((candidate) => candidate.id === id), { status: "sent", last_error: null });
+      const updates = { status: "sent", last_error: null };
+      if (normalized.includes("payload_json = NULL")) updates.payload_json = null;
+      Object.assign(outbox.find((candidate) => candidate.id === id), updates);
       return { meta: { changes: 1 } };
     }
     if (normalized.startsWith("UPDATE notification_outbox SET status = CASE WHEN attempts")) {
@@ -120,4 +127,27 @@ test("processEmailOutbox marks the message failed without calling Resend when no
   }
   assert.equal(db.outbox[0].status, "failed");
   assert.match(db.outbox[0].last_error, /correo del destinatario/);
+});
+
+test("processEmailOutbox renders the OTP code from payload_json and clears it after sending", async () => {
+  const db = makeFakeDb([{
+    id: "e", channel: "email", status: "queued", attempts: 0, user_id: null,
+    recipient_email: "parent@example.com", template_key: "login_otp", payload_json: JSON.stringify({ code: "482913" }),
+  }]);
+  let capturedBody = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    capturedBody = JSON.parse(init.body);
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    await processEmailOutbox({ DB: db, RESEND_API_KEY: "re_test_key", ...baseEnv });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(db.outbox[0].status, "sent");
+  assert.match(capturedBody.subject, /código de acceso/i);
+  assert.match(capturedBody.html, /482913/);
+  // The plaintext code has no reason to linger in the DB once the email is out.
+  assert.equal(db.outbox[0].payload_json, null);
 });

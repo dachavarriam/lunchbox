@@ -1224,7 +1224,8 @@ function contentSecurityPolicy(env: Env): string {
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com",
     "style-src 'self' 'unsafe-inline'",
-    `img-src 'self' data:${mediaOrigin ? ` ${mediaOrigin}` : ""}`,
+    // blob: is for the delivery-photo preview (URL.createObjectURL on the locally selected file, before upload).
+    `img-src 'self' data: blob:${mediaOrigin ? ` ${mediaOrigin}` : ""}`,
     "font-src 'self'",
     "connect-src 'self' https://challenges.cloudflare.com",
     "frame-src https://challenges.cloudflare.com",
