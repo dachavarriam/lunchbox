@@ -489,15 +489,6 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
     showToast(jobType === "package_label" ? "Etiqueta agregada a la cola" : "Comanda agregada a la cola");
   };
 
-  const deliverAllPacked = async () => {
-    if (!window.confirm("¿Confirmar como entregados todos los pedidos empacados? Se notificará a cada cliente.")) return;
-    const response = await fetch("/api/demo/kds/deliver-all", { method: "POST" });
-    const payload = await response.json() as { delivered?: number; error?: string };
-    if (!response.ok) { showToast(payload.error ?? "No se pudo confirmar la entrega"); return; }
-    await refreshDemoOrders();
-    showToast(payload.delivered ? `${payload.delivered} pedidos marcados como entregados` : "No hay pedidos empacados pendientes");
-  };
-
   const confirmDelivery = async (id: string, photo: File) => {
     const order = kdsOrders.find((candidate) => candidate.id === id);
     if (!order?.backendId) { showToast("No se pudo confirmar la entrega"); return; }
@@ -684,7 +675,7 @@ export function PrototypeApp({ initialSurface = "family", nowIso }: { initialSur
       )}
       {surface === "kitchen" && !isDeliveryOnly && (
         <Suspense fallback={<SurfaceLoading />}>
-          <LazyKitchenView orders={kdsOrders} advanceOrder={advanceOrder} queuePrint={queuePrint} deliverAllPacked={deliverAllPacked} showToast={showToast} />
+          <LazyKitchenView orders={kdsOrders} advanceOrder={advanceOrder} queuePrint={queuePrint} showToast={showToast} />
         </Suspense>
       )}
 

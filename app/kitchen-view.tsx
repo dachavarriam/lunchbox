@@ -4,11 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { PipiroIcon, APP_TIME_ZONE } from "./pipiro-shared";
 import type { KdsOrder, KdsStage } from "./pipiro-shared";
 
-export function KitchenView({ orders, advanceOrder, queuePrint, deliverAllPacked, showToast }: {
+export function KitchenView({ orders, advanceOrder, queuePrint, showToast }: {
   orders: KdsOrder[];
   advanceOrder: (id: string) => Promise<void>;
   queuePrint: (id: string, jobType: "kitchen_ticket" | "package_label") => Promise<void>;
-  deliverAllPacked: () => Promise<void>;
   showToast: (message: string) => void;
 }) {
   const stages: KdsStage[] = ["Nuevas", "Preparando", "Listas", "Empacadas"];
@@ -51,7 +50,6 @@ export function KitchenView({ orders, advanceOrder, queuePrint, deliverAllPacked
           <div className={delayed ? "kds-stat-alert" : ""}><small>Atrasadas</small><strong>{delayed}</strong></div>
           <div><small>Promedio cocina</small><strong>{averagePrep || "—"}{averagePrep ? " min" : ""}</strong></div>
           <div><small>Cola impresión</small><strong>{queuedPrints}</strong></div>
-          <button className="kds-deliver-all" disabled={!orders.some((order) => order.stage === "Empacadas")} onClick={() => void deliverAllPacked()}>Confirmar entregados</button>
           <button title="Resumen agrupado de cantidades por platillo y preparación" onClick={() => showToast("Resumen por platillo y preparación listo para conectar con la impresora")}>Resumen de producción</button>
         </div>
       </section>

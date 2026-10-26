@@ -2,6 +2,21 @@
 
 Registro de trabajo de seguridad/privacidad (rama `security-upgrades`) y de las mejoras funcionales que le siguieron (rama `functional-upgrades`) — ambas ya fusionadas a `main`. Sirve de base para documentación formal más adelante.
 
+## [Unreleased] — rama `data-minimization-kds` (continuación)
+
+### 2026-10-26 (continuación) — bitácora de accesos sensibles + cerrar el hueco de "entregado sin foto"
+
+El usuario pidió cerrar, de los hallazgos de la revisión anterior, los tres que consideró más importantes: registrar quién revisa datos sensibles, registrar inicios/cierres de sesión (cuidando la privacidad), y quitarle a Cocina la posibilidad de marcar pedidos como entregados sin foto ahora que Entrega ya está operando.
+
+- **feat(auditoría):** `createSession` (usada tanto por Google como por el login por correo) ahora registra en `audit_log` quién inició sesión, cuándo y con qué método (`login.google` / `login.email_otp`), igual que `logout` y `session.revoked` (cuando cierras otra sesión desde "Mi cuenta"). **Decisión de privacidad deliberada: no se guarda la IP** — el objetivo es "quién entró y cuándo", no un historial de ubicaciones/dispositivos; el `user_agent` ya vivía en `auth_sessions`, no se duplicó aquí. Solo se registran eventos exitosos (no intentos fallidos, que ya cubre el rate limiting y registrarlos crearía un historial de "quién intentó entrar como X" sin necesidad real).
+- **feat(auditoría):** Admin ahora registra en `audit_log` cuando revisa: la lista de clientes y sus saldos de crédito (`customer_list.viewed`), un comprobante de pago (`payment_receipt.viewed`), o una foto de evidencia de entrega (`delivery_photo.viewed`).
+- **feat(admin):** nuevo endpoint `GET /api/demo/admin/audit-log` y panel "Bitácora de actividad" en Configuración — sin esto, todo lo anterior quedaría escrito en D1 pero invisible; ahora Admin puede realmente investigar "¿quién entró y qué revisó?".
+- **privacidad:** `audit_log` se purga automáticamente a los 180 días (vía el cron existente) — bitácora de verdad, no una retención indefinida de quién hizo qué.
+- **fix(seguridad):** `POST /api/demo/kds/deliver-all` (marcar pedidos "empacados" como entregados en lote, **sin** evidencia fotográfica) quedó restringido a solo `admin` (antes también lo podía usar `kitchen`) y ahora exige sesión reciente (<30 min), igual que las demás acciones que pueden actuar sin dejar prueba de lo que realmente pasó. El botón "Confirmar entregados" se quitó de la pantalla de Cocina — la única forma de marcar un pedido como entregado desde Cocina/Entrega ahora es con foto, por pedido, vía la pantalla de Entrega. El endpoint queda solo como respaldo de Admin para una emergencia operativa, no como atajo de uso diario.
+- Verificado en vivo: una sesión de solo `kitchen` recibe 403 en `deliver-all`; una sesión de `admin` reciente puede usarla; una sesión de `admin` con 2 horas de antigüedad recibe `reauth_required`; un login real por OTP generó la fila `login.email_otp`; un logout generó `logout`; ver la lista de clientes generó `customer_list.viewed`; el panel "Bitácora de actividad" se ve y lista todo correctamente, incluyendo acciones antiguas que ya existían (pagos, platillos, etc.) con una etiqueta legible.
+  Archivos: `worker/auth.ts` (`createSession`, `logout`, `sessions/:id/revoke`), `worker/cms.ts` (lecturas sensibles + `GET /api/demo/admin/audit-log`), `worker/index.ts` (restricción de `deliver-all`, `pruneAuditLog`), `app/admin-view.tsx` (`AuditLogPanel`), `app/kitchen-view.tsx` y `app/prototype-app.tsx` (quitar `deliverAllPacked`), `app/globals.css`.
+- `pnpm test` (11 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
 ## [Unreleased] — rama `data-minimization-kds`
 
 ### 2026-10-26 — revisión de código visible en el navegador + exceso de datos a Cocina/Entrega

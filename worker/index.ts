@@ -2,7 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { handleCmsApi, handlePublicMedia } from "./cms";
-import { authorizeRequest, authorizeSurface, handleAuthApi, isPrivateDemoHost, requestSurface, resolveSession } from "./auth";
+import { authorizeRequest, authorizeSurface, handleAuthApi, isPrivateDemoHost, requestSurface, requireFreshAuth, resolveSession } from "./auth";
 import type { PipiroSurface } from "./auth";
 import { processPushOutbox, validPushSubscription } from "./push";
 import { processEmailOutbox } from "./email";
@@ -249,6 +249,15 @@ async function expireUnpaidBatches(env: Env): Promise<void> {
   }
 }
 
+/**
+ * Keeps the login/logout and sensitive-read trail bounded instead of growing forever — long
+ * enough for a real investigation (6 months), not an indefinite record of who looked at what.
+ */
+async function pruneAuditLog(env: Env, retentionDays = 180): Promise<void> {
+  await env.DB.prepare("DELETE FROM audit_log WHERE created_at < datetime('now', ?)")
+    .bind(`-${retentionDays} days`).run();
+}
+
 async function loadDemoOrders(env: Env, actorUserId: string | null): Promise<DemoOrderRow[]> {
   await expireUnpaidBatches(env);
   const result = await env.DB.prepare(
@@ -310,9 +319,13 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   if (disabled) return disabled;
 
   const kdsReadRequest = url.pathname === "/api/demo/kds";
-  const kitchenWriteRequest = url.pathname === "/api/demo/kds/deliver-all" || /^\/api\/demo\/orders\/[^/]+\/(status|print)$/.test(url.pathname);
+  const kitchenStatusRequest = /^\/api\/demo\/orders\/[^/]+\/(status|print)$/.test(url.pathname);
+  // Marking a batch "delivered" with no photo used to be a kitchen convenience; now that delivery
+  // confirms with evidence per order, this stays only as an admin-level override (and still needs
+  // a recent login, like the other actions that can act without proof of what actually happened).
+  const adminOnlyDeliverAllRequest = url.pathname === "/api/demo/kds/deliver-all";
   const deliveryWriteRequest = /^\/api\/demo\/delivery\/confirm\/[^/]+$/.test(url.pathname);
-  const kitchenRequest = kdsReadRequest || kitchenWriteRequest || deliveryWriteRequest;
+  const kitchenRequest = kdsReadRequest || kitchenStatusRequest || adminOnlyDeliverAllRequest || deliveryWriteRequest;
   const adminBootstrapRequest = url.pathname === "/api/demo/bootstrap" &&
     (requestSurface(url, env) === "admin" || (requestSurface(url, env) === null && url.searchParams.get("surface") === "admin"));
   const authorization = await authorizeRequest(
@@ -320,15 +333,17 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
     env,
     url,
     kdsReadRequest ? ["admin", "kitchen", "delivery"]
-      : kitchenWriteRequest ? ["admin", "kitchen"]
+      : kitchenStatusRequest ? ["admin", "kitchen"]
+      : adminOnlyDeliverAllRequest ? ["admin"]
       : deliveryWriteRequest ? ["admin", "delivery"]
       : adminBootstrapRequest ? ["admin"] : ["customer"],
     kitchenRequest || adminBootstrapRequest ? "user_admin_dachavarriam" : "user_demo_family",
   );
   if (authorization.response || !authorization.actor) return authorization.response;
-  const actorUserId = authorization.actor.userId;
+  const actor = authorization.actor;
+  const actorUserId = actor.userId;
 
-  if (request.method === "POST" && !authorization.actor.demo) {
+  if (request.method === "POST" && !actor.demo) {
     const sensitiveRoute = [
       { test: () => url.pathname === "/api/demo/orders", bucket: "orders", limit: 30 },
       { test: () => url.pathname === "/api/demo/payment-batches", bucket: "payment_batches", limit: 15 },
@@ -946,6 +961,8 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
   }
 
   if (request.method === "POST" && url.pathname === "/api/demo/kds/deliver-all") {
+    const freshAuthResponse = requireFreshAuth(actor);
+    if (freshAuthResponse) return freshAuthResponse;
     const rows = await env.DB.prepare(
       `SELECT o.id, o.guardian_user_id FROM orders o JOIN menu_days md ON md.id = o.menu_day_id
        JOIN payment_batch_orders pbo ON pbo.order_id = o.id JOIN payment_batches pb ON pb.id = pbo.payment_batch_id
@@ -1341,6 +1358,7 @@ const worker = {
     ctx.waitUntil(processPushOutbox(env));
     ctx.waitUntil(processEmailOutbox(env));
     ctx.waitUntil(pruneRateLimitCounters(env));
+    ctx.waitUntil(pruneAuditLog(env));
   },
 };
 

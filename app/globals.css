@@ -1263,7 +1263,8 @@ input:focus-visible {
 .ops-grid[data-admin-section="support"] > .support-admin-panel,
 .ops-grid[data-admin-section="settings"] > .payment-settings-panel,
 .ops-grid[data-admin-section="settings"] > .staff-access-panel,
-.ops-grid[data-admin-section="settings"] > .delivery-confirmations-panel { display: block; }
+.ops-grid[data-admin-section="settings"] > .delivery-confirmations-panel,
+.ops-grid[data-admin-section="settings"] > .audit-log-panel { display: block; }
 
 .analytics-heading { align-items: end; gap: 18px; }
 .analytics-filters { align-items: end; display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1298,6 +1299,9 @@ input:focus-visible {
 .delivery-confirmations-list article { align-items: center; background: #f4f7fa; border-radius: 14px; display: flex; justify-content: space-between; padding: 0.8rem 0.95rem; }
 .delivery-confirmations-list article span { color: #687987; display: block; font-size: 0.78rem; margin-top: 2px; }
 .delivery-confirmations-list article a { color: #1267c9; font-size: 0.8rem; font-weight: 800; }
+.audit-log-list { display: grid; gap: 0.5rem; max-height: 420px; overflow-y: auto; }
+.audit-log-list article { background: #f4f7fa; border-radius: 12px; padding: 0.7rem 0.9rem; }
+.audit-log-list article span { color: #687987; display: block; font-size: 0.75rem; margin-top: 2px; }
 .panel-footnote { color: #687987; font-size: 0.8rem; margin: 0.85rem 0 0; }
 .input-with-suffix { display: flex; align-items: center; gap: 0.5rem; background: #f3f6f9; border-radius: 12px; padding-right: 0.8rem; }
 .input-with-suffix input { background: transparent !important; }

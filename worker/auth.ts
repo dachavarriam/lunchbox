@@ -201,12 +201,22 @@ async function verifyGoogleIdToken(idToken: string, env: Env, expectedNonceHash:
 
 const LAST_SEEN_REFRESH_SECONDS = 60 * 60 * 24;
 
-async function createSession(env: Env, userId: string, userAgent: string | null): Promise<string> {
+/**
+ * Creates a session and records the login in audit_log — just who, when and how (Google vs.
+ * email OTP), keyed by the session's token hash. Deliberately no IP address: that would build a
+ * location/device trail beyond what "who logged in and when" needs, and rate limiting already
+ * uses IP transiently (short-lived counters) without keeping it on a permanent record.
+ */
+async function createSession(env: Env, userId: string, userAgent: string | null, method: "google" | "email_otp"): Promise<string> {
   const sessionToken = randomToken();
   const sessionHash = await sha256(sessionToken);
   const sessionExpiresAt = Math.floor(Date.now() / 1000) + SESSION_SECONDS;
-  await env.DB.prepare("INSERT INTO auth_sessions (token_hash, user_id, expires_at, user_agent) VALUES (?, ?, ?, ?)")
-    .bind(sessionHash, userId, sessionExpiresAt, userAgent?.slice(0, 300) ?? null).run();
+  await env.DB.batch([
+    env.DB.prepare("INSERT INTO auth_sessions (token_hash, user_id, expires_at, user_agent) VALUES (?, ?, ?, ?)")
+      .bind(sessionHash, userId, sessionExpiresAt, userAgent?.slice(0, 300) ?? null),
+    env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, ?, 'auth_session', ?)")
+      .bind(crypto.randomUUID(), userId, `login.${method}`, sessionHash),
+  ]);
   return sessionToken;
 }
 
@@ -434,7 +444,7 @@ export async function handleAuthApi(request: Request, env: Env, url: URL, ctx: E
        WHERE email = ? COLLATE NOCASE AND status = 'pending' AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))`,
     ).bind(userId, normalizedEmail).run();
 
-    const sessionToken = await createSession(env, userId, request.headers.get("user-agent"));
+    const sessionToken = await createSession(env, userId, request.headers.get("user-agent"), "google");
     const successHeaders = new Headers({ Location: `${origin}${safeReturnTo(loginState.return_to)}`, "Cache-Control": "no-store" });
     successHeaders.append("Set-Cookie", setCookie(authCookieName(url, "session"), sessionToken, SESSION_SECONDS, origin.startsWith("https://")));
     successHeaders.append("Set-Cookie", clearCookie(authCookieName(url, "oauth"), origin.startsWith("https://")));
@@ -538,7 +548,7 @@ export async function handleAuthApi(request: Request, env: Env, url: URL, ctx: E
       env.DB.prepare("SELECT id, email, display_name, locale FROM app_users WHERE id = ? LIMIT 1")
         .bind(userId).first<{ id: string; email: string; display_name: string; locale: string }>(),
     ]);
-    const sessionToken = await createSession(env, userId, request.headers.get("user-agent"));
+    const sessionToken = await createSession(env, userId, request.headers.get("user-agent"), "email_otp");
     const origin = appOrigin(url, env);
     return authJson({ ok: true, user, roles: roles.results.map((role) => role.role) }, {
       headers: { "Set-Cookie": setCookie(authCookieName(url, "session"), sessionToken, SESSION_SECONDS, origin.startsWith("https://")) },
@@ -558,7 +568,13 @@ export async function handleAuthApi(request: Request, env: Env, url: URL, ctx: E
       return authJson({ error: "Invalid origin" }, { status: 403 });
     }
     const session = await resolveSession(request, env, url);
-    if (session) await env.DB.prepare("UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?").bind(session.tokenHash).run();
+    if (session) {
+      await env.DB.batch([
+        env.DB.prepare("UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?").bind(session.tokenHash),
+        env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'logout', 'auth_session', ?)")
+          .bind(crypto.randomUUID(), session.user.id, session.tokenHash),
+      ]);
+    }
     return authJson({ ok: true }, { headers: { "Set-Cookie": clearCookie(authCookieName(url, "session"), expectedOrigin.startsWith("https://")) } });
   }
 
@@ -587,10 +603,13 @@ export async function handleAuthApi(request: Request, env: Env, url: URL, ctx: E
     if (!requestOriginAllowed(request, env, url)) return authJson({ error: "Origen no permitido" }, { status: 403 });
     const session = await resolveSession(request, env, url);
     if (!session) return authJson({ error: "Debes iniciar sesión" }, { status: 401 });
+    const revokedTokenHash = decodeURIComponent(revokeMatch[1]);
     const result = await env.DB.prepare(
       "UPDATE auth_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ? AND user_id = ? AND revoked_at IS NULL",
-    ).bind(decodeURIComponent(revokeMatch[1]), session.user.id).run();
+    ).bind(revokedTokenHash, session.user.id).run();
     if (!result.meta.changes) return authJson({ error: "Sesión no encontrada" }, { status: 404 });
+    await env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'session.revoked', 'auth_session', ?)")
+      .bind(crypto.randomUUID(), session.user.id, revokedTokenHash).run();
     return authJson({ ok: true });
   }
 

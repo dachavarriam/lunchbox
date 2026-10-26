@@ -272,6 +272,7 @@ export function AdminView({
         <SupportAdminPanel showToast={showToast} />
         <StaffAccessPanel showToast={showToast} />
         <DeliveryConfirmationsPanel />
+        <AuditLogPanel />
         <section className="panel import-panel">
           <div className="panel-title">
             <div>
@@ -586,6 +587,44 @@ function DeliveryConfirmationsPanel() {
   }, []);
   const dateFormat = new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short" });
   return <section className="panel delivery-confirmations-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="check" /></span><div><h2>Evidencia de entregas</h2><p>Fotos confirmando la entrega en el punto de recolección</p></div></div><span className="safe-chip">{confirmations.length} registradas</span></div><div className="delivery-confirmations-list">{confirmations.map((confirmation) => <article key={confirmation.id}><div><strong>{confirmation.order_number} · {confirmation.student_name}</strong><span>{confirmation.delivered_by} · {dateFormat.format(new Date(confirmation.created_at))}</span></div><a href={`/api/demo/admin/delivery-confirmations/${confirmation.id}/photo`} target="_blank" rel="noreferrer">Ver foto</a></article>)}{!confirmations.length && <div className="empty-transfer">Aún no hay entregas confirmadas con foto.</div>}</div></section>;
+}
+
+const AUDIT_ACTION_LABELS: Record<string, string> = {
+  "login.google": "Inició sesión con Google",
+  "login.email_otp": "Inició sesión con correo (OTP)",
+  "logout": "Cerró sesión",
+  "session.revoked": "Cerró otra sesión activa",
+  "customer_list.viewed": "Consultó la lista de clientes y saldos",
+  "payment_receipt.viewed": "Revisó un comprobante de pago",
+  "delivery_photo.viewed": "Revisó una foto de entrega",
+  "dish.created": "Creó un platillo",
+  "dish.updated": "Editó un platillo",
+  "dish.deactivated": "Desactivó un platillo",
+  "bank_account.created": "Agregó una cuenta bancaria",
+  "bank_account.updated": "Editó una cuenta bancaria",
+  "staff.invited": "Invitó a una persona del personal",
+  "payment.approved": "Aprobó un pago",
+  "payment.rejected": "Rechazó un pago",
+  "payment.amount_mismatch": "Marcó un pago con monto distinto",
+  "payment.cancelled": "Canceló un pago",
+  "payment.request_receipt": "Pidió comprobante de pago",
+  "payment.remind_receipt": "Envió recordatorio de comprobante",
+  "support.updated": "Actualizó una solicitud de ayuda",
+  "calendar.updated": "Actualizó el calendario del menú",
+};
+
+function AuditLogPanel() {
+  type AuditEntry = { id: string; action: string; entity_type: string; entity_id: string; created_at: string; actor_name: string | null; actor_email: string | null };
+  const [entries, setEntries] = useState<AuditEntry[]>([]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/demo/admin/audit-log", { headers: { Accept: "application/json" }, signal: controller.signal })
+      .then((response) => response.ok ? response.json() as Promise<{ entries?: AuditEntry[] }> : null)
+      .then((payload) => setEntries(payload?.entries ?? [])).catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+  const dateFormat = new Intl.DateTimeFormat("es-HN", { dateStyle: "medium", timeStyle: "short" });
+  return <section className="panel audit-log-panel wide-panel"><div className="panel-title"><div><span className="panel-icon"><PipiroIcon name="alert" /></span><div><h2>Bitácora de actividad</h2><p>Quién entró, salió y revisó información sensible — últimos 150 eventos</p></div></div><span className="safe-chip">{entries.length} eventos</span></div><div className="audit-log-list">{entries.map((entry) => <article key={entry.id}><strong>{AUDIT_ACTION_LABELS[entry.action] ?? entry.action}</strong><span>{entry.actor_name ?? entry.actor_email ?? "Sistema"} · {dateFormat.format(new Date(entry.created_at))}</span></article>)}{!entries.length && <div className="empty-transfer">Todavía no hay eventos registrados.</div>}</div></section>;
 }
 
 type AdminSupportRequest = SupportRequest & { display_name: string; order_number: string | null };

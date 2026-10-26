@@ -350,6 +350,8 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     if (!payment) return cmsJson({ error: "Comprobante no encontrado" }, { status: 404 });
     const object = await env.PAYMENT_RECEIPTS.get(payment.receipt_object_key);
     if (!object) return cmsJson({ error: "Comprobante no encontrado" }, { status: 404 });
+    await env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'payment_receipt.viewed', 'payment_batch', ?)")
+      .bind(crypto.randomUUID(), actorUserId, receiptMatch[1]).run();
     const safeName = (payment.receipt_original_name ?? "comprobante").replace(/[^a-zA-Z0-9._ -]/g, "_").slice(0, 120);
     const headers = new Headers({
       "Cache-Control": "private, no-store",
@@ -421,6 +423,8 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
        ORDER BY u.display_name COLLATE NOCASE, u.email COLLATE NOCASE
        LIMIT 250`,
     ).all();
+    await env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'customer_list.viewed', 'customer_list', 'all')")
+      .bind(crypto.randomUUID(), actorUserId).run();
     return cmsJson({ customers: customers.results });
   }
 
@@ -496,9 +500,21 @@ export async function handleCmsApi(request: Request, env: Env, url: URL): Promis
     if (!confirmation) return cmsJson({ error: "Evidencia no encontrada" }, { status: 404 });
     const object = await env.PAYMENT_RECEIPTS.get(confirmation.photo_object_key);
     if (!object) return cmsJson({ error: "Evidencia no encontrada" }, { status: 404 });
+    await env.DB.prepare("INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id) VALUES (?, ?, 'delivery_photo.viewed', 'delivery_confirmation', ?)")
+      .bind(crypto.randomUUID(), actorUserId, deliveryPhotoMatch[1]).run();
     return new Response(object.body, {
       headers: { "Cache-Control": "private, no-store", "Content-Type": confirmation.photo_content_type, "X-Content-Type-Options": "nosniff" },
     });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/demo/admin/audit-log") {
+    const entries = await env.DB.prepare(
+      `SELECT al.id, al.action, al.entity_type, al.entity_id, al.created_at,
+              u.display_name AS actor_name, u.email AS actor_email
+       FROM audit_log al LEFT JOIN app_users u ON u.id = al.actor_user_id
+       ORDER BY al.created_at DESC LIMIT 150`,
+    ).all();
+    return cmsJson({ entries: entries.results });
   }
 
   if (request.method === "POST" && url.pathname === "/api/demo/admin/credits") {
