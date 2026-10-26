@@ -2,6 +2,17 @@
 
 Registro de trabajo de seguridad/privacidad (rama `security-upgrades`) y de las mejoras funcionales que le siguieron (rama `functional-upgrades`) — ambas ya fusionadas a `main`. Sirve de base para documentación formal más adelante.
 
+## [Unreleased] — rama `data-minimization-kds`
+
+### 2026-10-26 — revisión de código visible en el navegador + exceso de datos a Cocina/Entrega
+
+El usuario pidió revisar específicamente qué se puede ver con "inspeccionar código fuente" en el navegador y qué podría explotar personal con malas intenciones.
+
+- **Código/bundles públicos:** revisados en producción (HTML de `/login`, bundle JS principal, `sw.js`). Sin comentarios, sin `TODO`/`console.log`/`debugger`, sin rutas ni datos internos filtrados. `/api/public/config` ya no expone la cuenta bancaria sin sesión (confirmado en vivo). Separación de bundles Admin/Cocina sigue sin poder descargarse desde el dominio del Cliente.
+- **fix(datos):** `GET /api/demo/kds` reutilizaba el mismo cargador de pedidos que usa Administración (`loadDemoOrders`), así que Cocina y Entrega recibían en la respuesta JSON el correo del padre, método de pago, referencia bancaria, `receipt_object_key`, motivo de rechazo/cancelación, etc. — ninguno de esos campos se usa ni se muestra en esas pantallas (confirmado leyendo el mapeo cliente en `app/prototype-app.tsx`). Ahora esa respuesta solo trae los campos que el ticket realmente necesita (estudiante, aula, platillo, alergia, tiempos, cola de impresión). Verificado en vivo: Cocina se ve idéntico, la respuesta ya no trae ningún dato financiero ni de contacto.
+  Archivos: `worker/index.ts` (`GET /api/demo/kds`).
+- `pnpm test` (11 pruebas), `tsc --noEmit` y `pnpm run lint` sin errores nuevos.
+
 ## [Unreleased] — rama `final-audit`
 
 ### 2026-10-23 — auditoría final de seguridad y privacidad (tras Seguridad + Funcional)

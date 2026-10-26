@@ -923,9 +923,26 @@ async function handleDemoApi(request: Request, env: Env, url: URL): Promise<Resp
 
   if (request.method === "GET" && url.pathname === "/api/demo/kds") {
     const orders = await loadDemoOrders(env, null);
-    return json({
-      orders: orders.filter((order) => order.payment_status === "approved" && !["cancelled", "delivered"].includes(order.status)),
-    });
+    // Kitchen/delivery only need what's on the ticket — not the guardian's email, payment method,
+    // bank reference, receipt key, etc. that loadDemoOrders carries for Admin's own views.
+    const kdsOrders = orders
+      .filter((order) => order.payment_status === "approved" && !["cancelled", "delivered"].includes(order.status))
+      .map((order) => ({
+        id: order.id,
+        order_number: order.order_number,
+        status: order.status,
+        delivery_time: order.delivery_time,
+        student_name: order.student_name,
+        classroom: order.classroom,
+        dish: order.dish,
+        allergies: order.allergies,
+        prep_time_minutes: order.prep_time_minutes,
+        stage_started_at: order.stage_started_at,
+        kitchen_started_at: order.kitchen_started_at,
+        ready_at: order.ready_at,
+        print_jobs_queued: order.print_jobs_queued,
+      }));
+    return json({ orders: kdsOrders });
   }
 
   if (request.method === "POST" && url.pathname === "/api/demo/kds/deliver-all") {
